@@ -12,6 +12,7 @@
 		1DA10CC9A972277BC5B616F0 /* TranscriptionRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03CD42879A5E6DD978622963 /* TranscriptionRequestTests.swift */; };
 		1E4F8B2F3CF2A8111FA82D64 /* TranscriptionClientIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FDB899C6C4EC86762403B27 /* TranscriptionClientIntegrationTests.swift */; };
 		2339352A1ADF1CC4D0BD710F /* MockURLProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = 287757359CA389D80C39B9B5 /* MockURLProtocol.swift */; };
+		23DEA498B42A9FA63DC10271 /* KeychainFileStorageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 24F0F6ACC45D645FC0F78CA0 /* KeychainFileStorageTests.swift */; };
 		2544965BAFBCC8A1F2FE19C1 /* AuditLogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F8CB90038AF44E31E5DEBDC /* AuditLogView.swift */; };
 		318BBF2B8D6AD80A931F238C /* SupportedAudioTypeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C519F9CF84187BD497A1BA35 /* SupportedAudioTypeTests.swift */; };
 		3686743C421E36FC6A4215B5 /* FolderWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90E6AA96551146684933B40E /* FolderWatcher.swift */; };
@@ -74,6 +75,7 @@
 		1E486522DE41FE6A2FC00432 /* InMemoryKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InMemoryKeychain.swift; sourceTree = "<group>"; };
 		20D35F1E4B0F180010FC1B95 /* TranscriptionRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionRequest.swift; sourceTree = "<group>"; };
 		2479C787A5E076F8674DEC7B /* implementation-plan.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "implementation-plan.md"; sourceTree = "<group>"; };
+		24F0F6ACC45D645FC0F78CA0 /* KeychainFileStorageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainFileStorageTests.swift; sourceTree = "<group>"; };
 		2541231F60251CDCDF95AD02 /* KeychainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainTests.swift; sourceTree = "<group>"; };
 		287757359CA389D80C39B9B5 /* MockURLProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockURLProtocol.swift; sourceTree = "<group>"; };
 		2D851A917E0166D0A2E4EA7F /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
@@ -216,6 +218,7 @@
 			children = (
 				6CED4791D1BA89CAF006D804 /* AppSettingsIntegrationTests.swift */,
 				AD97569419A9B33EAAB81467 /* AppSettingsTests.swift */,
+				24F0F6ACC45D645FC0F78CA0 /* KeychainFileStorageTests.swift */,
 				2541231F60251CDCDF95AD02 /* KeychainTests.swift */,
 				9A8CA80F8A0F5650DE74B9AB /* KeyComboTests.swift */,
 				B5B4C6E03309CF3B931A14F5 /* SettingsValidationTests.swift */,
@@ -582,6 +585,7 @@
 				610674F725396514E8B220C3 /* FolderWatcherIntegrationTests.swift in Sources */,
 				6DC0E3E16643A3F6BA465DCB /* InMemoryKeychain.swift in Sources */,
 				FA2017424A8BD7527620F479 /* KeyComboTests.swift in Sources */,
+				23DEA498B42A9FA63DC10271 /* KeychainFileStorageTests.swift in Sources */,
 				9E4784CA4C9F24B8739E1923 /* KeychainTests.swift in Sources */,
 				C9D70FC95189E073CA68157B /* MainWindowTabTests.swift in Sources */,
 				C975ADE0D1AA4A5D017EBBEC /* MenuBarControllerTests.swift in Sources */,

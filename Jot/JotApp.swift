@@ -16,6 +16,7 @@ import AppKit
 @main
 struct JotApp: App {
     @State private var menuBar = MenuBarController()
+    @State private var settings = AppSettings()
 
     var body: some Scene {
         MenuBarExtra {
@@ -36,6 +37,7 @@ struct JotApp: App {
         Window(Self.appDisplayName, id: "main") {
             MainWindow()
                 .environment(menuBar)
+                .environment(settings)
                 .frame(minWidth: 760, minHeight: 480)
         }
         .windowResizability(.contentMinSize)

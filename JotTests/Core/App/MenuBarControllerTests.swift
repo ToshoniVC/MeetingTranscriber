@@ -1,59 +1,55 @@
 import Testing
+import Foundation
 @testable import Jot
 
-/// Unit tests for `MenuBarController` — the small, headless state object that
-/// owns the menu-bar surface (Core/App/MenuBarController.swift).
-///
-/// Phase 0 surface is intentionally tiny (one Bool + 3 mutators). These tests
-/// pin the contract so Phase 5 (Pipeline wiring) and Phase 8 (custom
-/// `NSStatusItem`) build on a stable foundation.
+/// Tests for `MenuBarController` — the small @Observable state object the
+/// `MenuBarExtra` label binds to in `JotApp.swift`. Phase 5 reshaped this
+/// type from a Phase 0 placeholder into a real `PipelineState` mirror.
 @MainActor
 struct MenuBarControllerTests {
 
     @Test
-    func init_isMainWindowVisible_defaultsToFalse() {
+    func init_defaultsToNotConfigured() {
         let controller = MenuBarController()
-        #expect(controller.isMainWindowVisible == false)
+        #expect(controller.iconState == .notConfigured)
+        #expect(controller.isProcessing == false)
     }
 
     @Test
-    func showMainWindow_setsVisibleTrue() {
+    func isProcessing_trueOnlyForProcessingState() {
         let controller = MenuBarController()
-        controller.showMainWindow()
-        #expect(controller.isMainWindowVisible == true)
+
+        controller.iconState = .idle
+        #expect(controller.isProcessing == false)
+
+        let url = URL(fileURLWithPath: "/tmp/meeting.mp3")
+        controller.iconState = .processing(url)
+        #expect(controller.isProcessing == true)
+
+        controller.iconState = .error(url, "boom")
+        #expect(controller.isProcessing == false)
+
+        controller.iconState = .notConfigured
+        #expect(controller.isProcessing == false)
     }
 
     @Test
-    func showMainWindow_isIdempotent() {
+    func statusLine_describesEachState() {
         let controller = MenuBarController()
-        controller.showMainWindow()
-        controller.showMainWindow()
-        #expect(controller.isMainWindowVisible == true)
-    }
+        let url = URL(fileURLWithPath: "/tmp/meeting.mp3")
 
-    @Test
-    func hideMainWindow_setsVisibleFalse() {
-        let controller = MenuBarController()
-        controller.showMainWindow()
-        controller.hideMainWindow()
-        #expect(controller.isMainWindowVisible == false)
-    }
+        controller.iconState = .notConfigured
+        #expect(controller.statusLine == "Not yet configured")
 
-    @Test
-    func hideMainWindow_isIdempotent() {
-        let controller = MenuBarController()
-        controller.hideMainWindow()
-        controller.hideMainWindow()
-        #expect(controller.isMainWindowVisible == false)
-    }
+        controller.iconState = .idle
+        #expect(controller.statusLine.contains("Idle"))
 
-    @Test
-    func toggleMainWindow_flipsVisibility() {
-        let controller = MenuBarController()
-        #expect(controller.isMainWindowVisible == false)
-        controller.toggleMainWindow()
-        #expect(controller.isMainWindowVisible == true)
-        controller.toggleMainWindow()
-        #expect(controller.isMainWindowVisible == false)
+        controller.iconState = .processing(url)
+        #expect(controller.statusLine.contains("meeting.mp3"))
+        #expect(controller.statusLine.contains("Transcribing"))
+
+        controller.iconState = .error(url, "API key was rejected")
+        #expect(controller.statusLine.contains("Error"))
+        #expect(controller.statusLine.contains("API key was rejected"))
     }
 }

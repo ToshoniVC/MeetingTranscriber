@@ -1,47 +1,46 @@
 import AppKit
 import SwiftUI
 
-/// Owns the menu-bar surface and (in later phases) translates `PipelineState`
-/// into an icon-state animation per PRD §3.1.
+/// Owns the menu-bar surface and exposes a `PipelineState`-derived
+/// `iconState` for the `MenuBarExtra` label in `JotApp.swift`.
 ///
-/// **Phase 0 status:** placeholder. The menu-bar icon is currently declared
-/// inline in `JotApp.swift` via SwiftUI's `MenuBarExtra`; this controller just
-/// tracks a single `isMainWindowVisible` flag. Test coverage exists for the
-/// flag's defaults and transitions so that Phase 5 / Phase 8 wiring has a
-/// stable contract to build against.
+/// PRD §3.1 calls out three icon states:
+///   - Idle: standard monochromatic icon
+///   - Processing: subtle animation (we use `.symbolEffect(.pulse)`)
+///   - Error: red exclamation
+/// We add `notConfigured` for the "user hasn't set Settings up yet" case so
+/// the icon can hint at that without lying.
 ///
-/// **What lands later:**
-/// - Phase 5 (Pipeline orchestrator): subscribe to `PipelineState` and expose
-///   a derived `IconState` (idle / processing / error).
-/// - Phase 8 (Icon state machine + UI polish): replace `MenuBarExtra` with a
-///   custom `NSStatusItem` so a single click on the icon toggles the main
-///   window directly (no dropdown), matching PRD §3.1.
-///
-/// Lives in `Core/App/` per Claude/coding-instructions.md §2: the menu-bar
-/// surface is app-wide infrastructure, not a feature.
+/// Phase 8 (UI polish) will replace the `MenuBarExtra` with a custom
+/// `NSStatusItem` so a single click on the icon toggles the main window
+/// directly (PRD §3.1: "does not use a dropdown menu"). For now the icon
+/// shows a dropdown; the icon glyph itself reflects state correctly.
 @MainActor
 @Observable
 final class MenuBarController {
-    /// Whether the main window is currently requested to be visible.
-    /// Phase 0 stub — flipped by the methods below; not yet wired to the
-    /// actual SwiftUI `Window` scene's open/close lifecycle (that's Phase 8).
-    private(set) var isMainWindowVisible: Bool = false
+
+    /// The current pipeline state, mirrored from `PipelineCoordinator`.
+    /// `MenuBarExtra` reads this to render the right icon variant.
+    var iconState: PipelineState = .notConfigured
 
     init() {}
 
-    /// Request that the main window become visible.
-    func showMainWindow() {
-        isMainWindowVisible = true
+    // MARK: - Convenience
+
+    /// `true` when the icon should show the "actively processing" animation.
+    var isProcessing: Bool {
+        if case .processing = iconState { return true }
+        return false
     }
 
-    /// Request that the main window be hidden.
-    func hideMainWindow() {
-        isMainWindowVisible = false
-    }
-
-    /// Toggle the requested visibility — the click handler the Phase 8
-    /// custom `NSStatusItem` will call.
-    func toggleMainWindow() {
-        isMainWindowVisible.toggle()
+    /// One-line description of the current state, suitable for the menu-bar
+    /// dropdown's status row.
+    var statusLine: String {
+        switch iconState {
+        case .notConfigured: return "Not yet configured"
+        case .idle:          return "Idle — watching for recordings"
+        case .processing(let url): return "Transcribing \(url.lastPathComponent)…"
+        case .error(_, let message): return "Error: \(message)"
+        }
     }
 }

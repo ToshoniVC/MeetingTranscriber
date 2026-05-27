@@ -3,34 +3,37 @@ import AppKit
 
 /// The Jot app entry point.
 ///
-/// Declares two scenes:
-/// - `MenuBarExtra`: the always-visible menu-bar icon. Phase 0 uses the
-///   default `.menu` style with an "Open Jot" action. Phase 8 (icon state
-///   machine + UI polish) replaces this with a custom `NSStatusItem` so a
-///   single click toggles the main window directly (no dropdown) per PRD §3.1.
-/// - `Window`: the main application window with the three PRD tabs.
-///   `MainWindow` (Core/App) owns the layout and routing.
-///
-/// Per Claude/coding-instructions.md §2 (Feature-Driven Design), the app
-/// scene lives in the target's root, not under any feature folder.
+/// Owns the long-lived `@MainActor` objects that the rest of the app reads
+/// from the environment: `AppSettings`, `AuditLogStore`, `MenuBarController`,
+/// and the `PipelineCoordinator` that wires them together with the
+/// `FolderWatcher` + `TranscriptionClient` + `FileOrganizer`.
 @main
 struct JotApp: App {
-    @State private var menuBar = MenuBarController()
-    @State private var settings = AppSettings()
+    @State private var menuBar: MenuBarController
+    @State private var settings: AppSettings
+    @State private var auditLog: AuditLogStore
+    @State private var pipeline: PipelineCoordinator
+
+    init() {
+        let menuBar = MenuBarController()
+        let settings = AppSettings()
+        let auditLog = AuditLogStore()
+        let pipeline = PipelineCoordinator(
+            settings: settings,
+            auditLog: auditLog,
+            menuBar: menuBar
+        )
+        self._menuBar = State(initialValue: menuBar)
+        self._settings = State(initialValue: settings)
+        self._auditLog = State(initialValue: auditLog)
+        self._pipeline = State(initialValue: pipeline)
+    }
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarDropdown()
+            MenuBarDropdown(menuBar: menuBar, pipeline: pipeline)
         } label: {
-            // Distinct icon for Debug so the dev build is visually different
-            // in the menu bar from the production install (PRD-supporting per
-            // development-lifecycle.md §2: "tinted icon for the dev variant").
-            // Both renders are template-styled by macOS to match the menu bar.
-            #if DEBUG
-            Image(systemName: "hammer")
-            #else
-            Image(systemName: "waveform")
-            #endif
+            MenuBarIconLabel(state: menuBar.iconState)
         }
         .menuBarExtraStyle(.menu)
 
@@ -38,34 +41,84 @@ struct JotApp: App {
             MainWindow()
                 .environment(menuBar)
                 .environment(settings)
+                .environment(auditLog)
+                .environment(pipeline)
                 .frame(minWidth: 760, minHeight: 480)
+                .task {
+                    await pipeline.bootstrap()
+                }
         }
         .windowResizability(.contentMinSize)
     }
 
-    /// Resolves the user-visible app name from the bundle's `CFBundleName`,
-    /// so the production build shows "Jot" and the Debug build shows "Jot Dev"
-    /// without any `#if DEBUG` ceremony at the call sites.
+    /// Resolves the user-visible app name from the bundle so the Window
+    /// title shows "Jot" in Release and "Jot Dev" in Debug.
     static var appDisplayName: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Jot"
     }
 }
 
-/// Phase 0 placeholder dropdown shown when the menu-bar icon is clicked.
+/// The menu-bar icon — derived from `MenuBarController.iconState`.
 ///
-/// Phase 8 replaces this with click-to-toggle-window behavior on a custom
-/// `NSStatusItem`. Until then, "Open <AppName>" gives the user a way to
-/// surface the main window.
+/// macOS template-renders SF Symbols here so they pick up the menu bar's
+/// adaptive color. We change the *glyph* per state and add a pulse animation
+/// for processing.
+private struct MenuBarIconLabel: View {
+    let state: PipelineState
+
+    var body: some View {
+        switch state {
+        case .notConfigured:
+            // Distinct icon for Debug so the dev build is visually different
+            // from the production install. Both renders are template-styled
+            // by macOS to match the menu bar.
+            #if DEBUG
+            Image(systemName: "hammer")
+            #else
+            Image(systemName: "waveform.slash")
+            #endif
+        case .idle:
+            #if DEBUG
+            Image(systemName: "hammer")
+            #else
+            Image(systemName: "waveform")
+            #endif
+        case .processing:
+            Image(systemName: "waveform.circle")
+                .symbolEffect(.pulse, options: .repeating)
+        case .error:
+            Image(systemName: "exclamationmark.triangle.fill")
+        }
+    }
+}
+
+/// The dropdown shown when the menu-bar icon is clicked. Phase 8 replaces
+/// this with click-to-toggle-window behavior on a custom `NSStatusItem`
+/// (PRD §3.1 says "does not use a dropdown menu"); for now this gives the
+/// user a way to surface the main window + see the current state inline.
 private struct MenuBarDropdown: View {
+    let menuBar: MenuBarController
+    let pipeline: PipelineCoordinator
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        // Status row
+        Text(menuBar.statusLine)
+            .foregroundStyle(.secondary)
+
+        Divider()
+
+        // "Dismiss error" only shown while the icon is red, so the menu
+        // stays tidy in the normal case.
+        if case .error = menuBar.iconState {
+            Button("Dismiss error") {
+                pipeline.dismissError()
+            }
+            Divider()
+        }
+
         Button("Open \(JotApp.appDisplayName)") {
             openWindow(id: "main")
-            // LSUIElement=YES apps are "background" by default — `openWindow`
-            // surfaces the window but leaves Jot behind the currently-active
-            // app. Activate explicitly so the window comes to the front and
-            // Jot becomes the focused app.
             NSApp.activate(ignoringOtherApps: true)
         }
         .keyboardShortcut("o")

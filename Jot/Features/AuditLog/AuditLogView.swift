@@ -1,17 +1,54 @@
 import SwiftUI
 
-/// Phase 0 placeholder for the Audit Log tab.
-///
-/// Phase 5 (Claude/implementation-plan.md §6) replaces this with the real
-/// chronological event log per PRD §3.2 Tab 2 — persisted to disk via
-/// `AuditLogStore`, with "Retry" buttons on failure rows and a "Clear Log"
-/// button.
+/// PRD §3.2 Tab 2 — chronological list of pipeline events, plus a "Clear
+/// Log" button. Failure rows have a Retry button that re-enqueues the
+/// source file into the pipeline.
 struct AuditLogView: View {
+    @Environment(AuditLogStore.self) private var store
+    @Environment(PipelineCoordinator.self) private var pipeline
+
     var body: some View {
-        ContentUnavailableView(
-            "Audit Log",
-            systemImage: "list.bullet.clipboard",
-            description: Text("Pipeline events (successes, failures, retries) will appear here.\n(Implementation lands in Phase 5.)")
-        )
+        VStack(alignment: .leading, spacing: 0) {
+            // Header bar
+            HStack {
+                Text("Audit Log")
+                    .font(.title2.weight(.semibold))
+                Spacer()
+                if !store.entries.isEmpty {
+                    Button(role: .destructive) {
+                        store.clear()
+                        // Also reset the menu-bar icon if it's still red
+                        // from a previous failure — the user has acknowledged
+                        // and cleared the slate.
+                        pipeline.dismissError()
+                    } label: {
+                        Label("Clear Log", systemImage: "trash")
+                    }
+                    .controlSize(.small)
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 12)
+
+            Divider()
+
+            // Body
+            if store.entries.isEmpty {
+                ContentUnavailableView(
+                    "No events yet",
+                    systemImage: "list.bullet.clipboard",
+                    description: Text("Drop an audio file into your Watch Folder and watch this list fill up.")
+                )
+            } else {
+                List(store.entries) { entry in
+                    AuditLogRow(entry: entry) {
+                        Task { await pipeline.retry(url: URL(fileURLWithPath: entry.sourcePath)) }
+                    }
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                }
+                .listStyle(.inset)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }

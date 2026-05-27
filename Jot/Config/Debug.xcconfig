@@ -1,0 +1,20 @@
+// Debug.xcconfig
+//
+// Per Claude/development-lifecycle.md §2: Debug builds are "Jot Dev" with a
+// `.dev`-suffixed bundle ID so they install side-by-side with the production
+// "Jot" without touching its Keychain, settings, or Login Item registration.
+
+PRODUCT_NAME = Jot Dev
+PRODUCT_BUNDLE_IDENTIFIER = com.toshonivc.jot.dev
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon-Dev
+
+// Versioning per Claude/development-lifecycle.md §5.2
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+// Code signing — ad-hoc (no Apple Developer ID needed per the free-path
+// decision discussed in chat). Sparkle, added in Phase 8, still verifies
+// updates safely via its own EdDSA key independent of Apple signing.
+CODE_SIGN_IDENTITY = -
+CODE_SIGN_STYLE = Manual
+DEVELOPMENT_TEAM =

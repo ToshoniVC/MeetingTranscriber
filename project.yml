@@ -1,0 +1,117 @@
+# XcodeGen project specification for Jot.
+#
+# Source of truth for the Xcode project structure. To regenerate Jot.xcodeproj:
+#
+#   ~/tools/XcodeGen/.build/release/xcodegen generate
+#
+# (We build XcodeGen from source rather than installing via Homebrew per the
+# free-path setup discussed in chat. If you have brew, `brew install xcodegen`
+# also works and you can just call `xcodegen generate`.)
+#
+# Conventions:
+# - Per-config build settings (bundle ID, product name, version, signing) live
+#   in Jot/Config/{Debug,Release}.xcconfig, not in this file.
+# - Per Claude/coding-instructions.md §2, source folders are organized by
+#   feature, not by file type. xcodegen mirrors the on-disk layout under Jot/.
+
+name: Jot
+
+options:
+  bundleIdPrefix: com.toshonivc
+  deploymentTarget:
+    macOS: "14.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+configs:
+  Debug: debug
+  Release: release
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+# Top-level docs / repo-root files surfaced in the Xcode navigator for
+# convenience. Not built, not bundled.
+fileGroups:
+  - CLAUDE.md
+  - README.md
+  - .gitignore
+  - Claude
+  - PRD
+  - .vscode
+  - project.yml
+
+targets:
+  Jot:
+    type: application
+    platform: macOS
+    sources:
+      - path: Jot
+        excludes:
+          # xcconfigs are wired via `configFiles` below, not as compiled sources
+          - "Config/*.xcconfig"
+          # Info.plist is wired via INFOPLIST_FILE
+          - "Info.plist"
+          # entitlements is wired via CODE_SIGN_ENTITLEMENTS
+          - "Jot.entitlements"
+      # Re-add Info.plist + entitlements + xcconfigs as visible-but-non-built
+      # files so they appear in the Xcode navigator.
+      - path: Jot/Info.plist
+        buildPhase: none
+      - path: Jot/Jot.entitlements
+        buildPhase: none
+      - path: Jot/Config
+        buildPhase: none
+    configFiles:
+      Debug: Jot/Config/Debug.xcconfig
+      Release: Jot/Config/Release.xcconfig
+    settings:
+      base:
+        INFOPLIST_FILE: Jot/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Jot/Jot.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        # Force the Swift module name to "Jot" regardless of PRODUCT_NAME
+        # (which differs per config: "Jot Dev" in Debug, "Jot" in Release).
+        # Without this, the module would inherit the space-stripped name from
+        # PRODUCT_NAME, breaking `@testable import Jot` in JotTests.
+        PRODUCT_MODULE_NAME: Jot
+
+  JotTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - JotTests
+    dependencies:
+      - target: Jot
+    settings:
+      base:
+        BUNDLE_LOADER: "$(TEST_HOST)"
+        # Hardcoded to the Debug-config PRODUCT_NAME ("Jot Dev"). Tests only
+        # run in the Debug configuration per the scheme below, so a hardcoded
+        # path is safe. xcodegen's auto-derivation uses the host *target* name
+        # rather than its product name, which is wrong here.
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Jot Dev.app/Contents/MacOS/Jot Dev"
+        # Test bundle has no hand-written Info.plist; let Xcode generate one
+        # from build settings. (The host app has a real one.)
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.toshonivc.jot.tests
+
+schemes:
+  Jot:
+    build:
+      targets:
+        Jot: all
+        JotTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - JotTests
+    archive:
+      config: Release

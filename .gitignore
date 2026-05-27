@@ -1,2 +1,22 @@
 .claude/
 .DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.dSYM
+*.dSYM.zip
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+# Generated Xcode project (regenerated from project.yml via xcodegen)
+# Kept committed for ease of clone-and-build, but the canonical source is project.yml.
+# If you want to gitignore it instead, uncomment the next line:
+# Jot.xcodeproj/

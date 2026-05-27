@@ -52,7 +52,7 @@ struct KeychainStorageContractTests {
     @Test
     func set_propagatesInjectedError() {
         let keychain = InMemoryKeychain()
-        keychain.nextSetError = .unhandled(status: -25300)
+        keychain.nextSetError = .ioFailure("simulated")
         #expect(throws: KeychainError.self) {
             try keychain.setString("anything", forKey: "api_key")
         }

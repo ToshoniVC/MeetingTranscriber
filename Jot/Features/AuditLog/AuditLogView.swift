@@ -17,6 +17,10 @@ struct AuditLogView: View {
                 if !store.entries.isEmpty {
                     Button(role: .destructive) {
                         store.clear()
+                        // Also reset the menu-bar icon if it's still red
+                        // from a previous failure — the user has acknowledged
+                        // and cleared the slate.
+                        pipeline.dismissError()
                     } label: {
                         Label("Clear Log", systemImage: "trash")
                     }

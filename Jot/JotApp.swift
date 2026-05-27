@@ -31,7 +31,7 @@ struct JotApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarDropdown(menuBar: menuBar)
+            MenuBarDropdown(menuBar: menuBar, pipeline: pipeline)
         } label: {
             MenuBarIconLabel(state: menuBar.iconState)
         }
@@ -98,6 +98,7 @@ private struct MenuBarIconLabel: View {
 /// user a way to surface the main window + see the current state inline.
 private struct MenuBarDropdown: View {
     let menuBar: MenuBarController
+    let pipeline: PipelineCoordinator
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -106,6 +107,15 @@ private struct MenuBarDropdown: View {
             .foregroundStyle(.secondary)
 
         Divider()
+
+        // "Dismiss error" only shown while the icon is red, so the menu
+        // stays tidy in the normal case.
+        if case .error = menuBar.iconState {
+            Button("Dismiss error") {
+                pipeline.dismissError()
+            }
+            Divider()
+        }
 
         Button("Open \(JotApp.appDisplayName)") {
             openWindow(id: "main")

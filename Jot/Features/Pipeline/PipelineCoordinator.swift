@@ -66,6 +66,18 @@ final class PipelineCoordinator {
         // we don't pre-emptively dismiss the original failure row.
     }
 
+    /// Reset the menu-bar icon from `.error(...)` back to a healthy state.
+    /// Called from the Audit Log's Clear Log button and from a dedicated
+    /// "Dismiss error" menu item — both ways the user can explicitly say
+    /// "I've seen the error, move on" without having to drop another file.
+    ///
+    /// Only acts when currently in error state; otherwise a no-op so it's
+    /// safe to call defensively.
+    func dismissError() {
+        guard case .error = menuBar.iconState else { return }
+        menuBar.iconState = (pipeline != nil) ? .idle : .notConfigured
+    }
+
     // MARK: - Settings observation
 
     private func observeSettings() async {

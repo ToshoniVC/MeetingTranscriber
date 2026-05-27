@@ -13,6 +13,10 @@ struct JotApp: App {
     @State private var settings: AppSettings
     @State private var auditLog: AuditLogStore
     @State private var pipeline: PipelineCoordinator
+    @State private var hotkey: HotkeyCoordinator
+    @State private var loginItem: LoginItemController
+    @State private var audioHijack: AudioHijackPresence
+    @State private var audioHijackController: AudioHijackController
 
     init() {
         let menuBar = MenuBarController()
@@ -23,17 +27,40 @@ struct JotApp: App {
             auditLog: auditLog,
             menuBar: menuBar
         )
+        let audioHijack = AudioHijackPresence()
+        let invoker = ShortcutInvoker()
+        let ahController = AudioHijackController(
+            prompter: SystemMeetingNamePrompter(),
+            invoker: invoker,
+            presence: audioHijack
+        )
+        let hotkey = HotkeyCoordinator(
+            settings: settings,
+            registrar: HotkeyRegistrar(),
+            invoker: invoker,
+            audioHijack: ahController,
+            menuBar: menuBar,
+            auditLog: auditLog
+        )
+        let loginItem = LoginItemController(manager: LoginItemManager())
         self._menuBar = State(initialValue: menuBar)
         self._settings = State(initialValue: settings)
         self._auditLog = State(initialValue: auditLog)
         self._pipeline = State(initialValue: pipeline)
+        self._hotkey = State(initialValue: hotkey)
+        self._loginItem = State(initialValue: loginItem)
+        self._audioHijack = State(initialValue: audioHijack)
+        self._audioHijackController = State(initialValue: ahController)
     }
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarDropdown(menuBar: menuBar, pipeline: pipeline)
+            MenuBarDropdown(menuBar: menuBar, pipeline: pipeline, hotkey: hotkey)
         } label: {
-            MenuBarIconLabel(state: menuBar.iconState)
+            MenuBarIconLabel(
+                isRecording: menuBar.isRecording,
+                pipelineState: menuBar.iconState
+            )
         }
         .menuBarExtraStyle(.menu)
 
@@ -43,9 +70,21 @@ struct JotApp: App {
                 .environment(settings)
                 .environment(auditLog)
                 .environment(pipeline)
+                .environment(hotkey)
+                .environment(loginItem)
+                .environment(audioHijack)
+                .environment(audioHijackController)
                 .frame(minWidth: 760, minHeight: 480)
                 .task {
                     await pipeline.bootstrap()
+                    await hotkey.bootstrap()
+                    // If the user had Launch on Startup enabled previously,
+                    // reapply on launch so the registration is fresh (a
+                    // freshly-installed binary might have a different code
+                    // signature than the last registration).
+                    if settings.launchOnStartup {
+                        loginItem.apply(enabled: true)
+                    }
                 }
         }
         .windowResizability(.contentMinSize)
@@ -58,16 +97,31 @@ struct JotApp: App {
     }
 }
 
-/// The menu-bar icon — derived from `MenuBarController.iconState`.
+/// The menu-bar icon. Recording state takes precedence over pipeline
+/// state — that's the user's most-immediate concern. When not recording,
+/// we render the existing pipeline-state glyph.
 ///
 /// macOS template-renders SF Symbols here so they pick up the menu bar's
-/// adaptive color. We change the *glyph* per state and add a pulse animation
-/// for processing.
+/// adaptive color. For the recording case we use `.palette` rendering
+/// with `.red` so the dot stays visible against any wallpaper.
 private struct MenuBarIconLabel: View {
-    let state: PipelineState
+    let isRecording: Bool
+    let pipelineState: PipelineState
 
     var body: some View {
-        switch state {
+        if isRecording {
+            Image(systemName: "record.circle.fill")
+                .symbolRenderingMode(.palette)
+                .foregroundStyle(.red)
+                .symbolEffect(.pulse, options: .repeating)
+        } else {
+            pipelineIcon
+        }
+    }
+
+    @ViewBuilder
+    private var pipelineIcon: some View {
+        switch pipelineState {
         case .notConfigured:
             // Distinct icon for Debug so the dev build is visually different
             // from the production install. Both renders are template-styled
@@ -99,14 +153,24 @@ private struct MenuBarIconLabel: View {
 private struct MenuBarDropdown: View {
     let menuBar: MenuBarController
     let pipeline: PipelineCoordinator
+    let hotkey: HotkeyCoordinator
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        // Status row
+        // Status row — recording state takes priority
         Text(menuBar.statusLine)
             .foregroundStyle(.secondary)
 
         Divider()
+
+        // "Stop recording" only shown while AH is recording — gives the user
+        // a click-to-stop path that doesn't require the hotkey.
+        if menuBar.isRecording {
+            Button("Stop recording") {
+                Task { await hotkey.stopRecordingNow() }
+            }
+            Divider()
+        }
 
         // "Dismiss error" only shown while the icon is red, so the menu
         // stays tidy in the normal case.

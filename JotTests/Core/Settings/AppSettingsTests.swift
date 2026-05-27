@@ -24,8 +24,70 @@ struct AppSettingsTests {
         #expect(settings.watchFolderBookmark == nil)
         #expect(settings.outputFolderBookmark == nil)
         #expect(settings.recordingHotkey == nil)
+        #expect(settings.startShortcutName == "Jot Start Recording")
+        #expect(settings.stopShortcutName == "Jot Stop Recording")
+        #expect(settings.customShortcutName == "Jot Toggle Recording")
+        // The "out of the box" default is the built-in toggle flow.
+        #expect(settings.useBuiltInRecording == true)
         #expect(settings.launchOnStartup == false)
         #expect(settings.apiKey == nil)
+    }
+
+    @Test
+    func setStartShortcutName_persistsAndRoundTrips() {
+        let defaults = EphemeralUserDefaults.make()
+        defer { EphemeralUserDefaults.tearDown(defaults) }
+        let keychain = InMemoryKeychain()
+        do {
+            let settings = AppSettings(defaults: defaults, keychain: keychain)
+            settings.startShortcutName = "Start Meeting Recording"
+            #expect(defaults.string(forKey: "jot.settings.startShortcutName") == "Start Meeting Recording")
+        }
+        let reborn = AppSettings(defaults: defaults, keychain: keychain)
+        #expect(reborn.startShortcutName == "Start Meeting Recording")
+    }
+
+    @Test
+    func setStopShortcutName_persistsAndRoundTrips() {
+        let defaults = EphemeralUserDefaults.make()
+        defer { EphemeralUserDefaults.tearDown(defaults) }
+        let keychain = InMemoryKeychain()
+        do {
+            let settings = AppSettings(defaults: defaults, keychain: keychain)
+            settings.stopShortcutName = "End Meeting Recording"
+            #expect(defaults.string(forKey: "jot.settings.stopShortcutName") == "End Meeting Recording")
+        }
+        let reborn = AppSettings(defaults: defaults, keychain: keychain)
+        #expect(reborn.stopShortcutName == "End Meeting Recording")
+    }
+
+    @Test
+    func setCustomShortcutName_persistsAndRoundTrips() {
+        let defaults = EphemeralUserDefaults.make()
+        defer { EphemeralUserDefaults.tearDown(defaults) }
+        let keychain = InMemoryKeychain()
+        do {
+            let settings = AppSettings(defaults: defaults, keychain: keychain)
+            settings.customShortcutName = "My Custom Recording Shortcut"
+            #expect(defaults.string(forKey: "jot.settings.customShortcutName") == "My Custom Recording Shortcut")
+        }
+        let reborn = AppSettings(defaults: defaults, keychain: keychain)
+        #expect(reborn.customShortcutName == "My Custom Recording Shortcut")
+    }
+
+    @Test
+    func setUseBuiltInRecording_persistsAndRoundTrips() {
+        let defaults = EphemeralUserDefaults.make()
+        defer { EphemeralUserDefaults.tearDown(defaults) }
+        let keychain = InMemoryKeychain()
+        do {
+            let settings = AppSettings(defaults: defaults, keychain: keychain)
+            #expect(settings.useBuiltInRecording == true)   // default
+            settings.useBuiltInRecording = false
+            #expect(defaults.bool(forKey: "jot.settings.useBuiltInRecording") == false)
+        }
+        let reborn = AppSettings(defaults: defaults, keychain: keychain)
+        #expect(reborn.useBuiltInRecording == false)
     }
 
     // MARK: - Mutation persists via didSet

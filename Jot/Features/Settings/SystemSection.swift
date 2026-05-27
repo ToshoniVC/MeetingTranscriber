@@ -2,15 +2,12 @@ import SwiftUI
 import AppKit
 
 /// PRD §3.2 Tab 3 → System & Automation:
-/// - Launch on Startup toggle
-/// - Quit Jot button
-///
-/// The Launch on Startup toggle stores the user's intent in `AppSettings`.
-/// The actual `SMAppService.mainApp.register()` call lives in Phase 7 (Core/
-/// LoginItem/LoginItemManager.swift). For Phase 1 the toggle is wired to the
-/// stored preference only — no system-level effect yet.
+/// - Launch on Startup toggle (registered via `SMAppService.mainApp` —
+///   see `Core/LoginItem/LoginItemManager.swift`).
+/// - Quit Jot button.
 struct SystemSection: View {
     @Environment(AppSettings.self) private var settings
+    @Environment(LoginItemController.self) private var loginItem
 
     var body: some View {
         @Bindable var bindable = settings
@@ -25,12 +22,17 @@ struct SystemSection: View {
             Toggle(isOn: $bindable.launchOnStartup) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Launch on Startup")
-                    Text("System-level registration via SMAppService lands in Phase 7.")
+                    Text(loginItem.statusMessage)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(loginItem.lastError == nil ? Color.secondary : Color.red)
                 }
             }
             .toggleStyle(.switch)
+            // Side-effect: every time the toggle flips, ask LoginItemManager
+            // to actually register/unregister us with macOS.
+            .onChange(of: settings.launchOnStartup) { _, newValue in
+                loginItem.apply(enabled: newValue)
+            }
 
             HStack {
                 Button(role: .destructive) {

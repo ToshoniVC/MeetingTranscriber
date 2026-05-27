@@ -49,6 +49,37 @@ final class AppSettings {
         }
     }
 
+    /// When the recording hotkey fires, use Jot's built-in toggle flow
+    /// (`true`, the default) — Jot prompts for a meeting name and runs
+    /// `startShortcutName` / `stopShortcutName` based on its own local
+    /// view of "is recording right now?". Set to `false` to bypass the
+    /// prompt and the state tracking and just run `customShortcutName`
+    /// on every hotkey press (the user's Shortcut handles everything).
+    var useBuiltInRecording: Bool {
+        didSet { defaults.set(useBuiltInRecording, forKey: Keys.useBuiltInRecording) }
+    }
+
+    /// Name of the Apple Shortcut Jot runs to **start** recording in
+    /// the built-in flow. The user authors this Shortcut to invoke Audio
+    /// Hijack 4's `Run/Stop Session` intent with `state = running`.
+    /// Default `"Jot Start Recording"`.
+    var startShortcutName: String {
+        didSet { defaults.set(startShortcutName, forKey: Keys.startShortcutName) }
+    }
+
+    /// Name of the Apple Shortcut Jot runs to **stop** recording in the
+    /// built-in flow. Author with `state = stopped`. Default `"Jot Stop Recording"`.
+    var stopShortcutName: String {
+        didSet { defaults.set(stopShortcutName, forKey: Keys.stopShortcutName) }
+    }
+
+    /// Name of the Apple Shortcut Jot runs in the custom flow (no prompt,
+    /// no state tracking). Default `"Jot Toggle Recording"` — user-authored
+    /// to handle both start/stop themselves.
+    var customShortcutName: String {
+        didSet { defaults.set(customShortcutName, forKey: Keys.customShortcutName) }
+    }
+
     var launchOnStartup: Bool {
         didSet { defaults.set(launchOnStartup, forKey: Keys.launchOnStartup) }
     }
@@ -90,6 +121,18 @@ final class AppSettings {
         } else {
             self.recordingHotkey = nil
         }
+        self.startShortcutName = defaults.string(forKey: Keys.startShortcutName) ?? "Jot Start Recording"
+        self.stopShortcutName = defaults.string(forKey: Keys.stopShortcutName) ?? "Jot Stop Recording"
+        self.customShortcutName = defaults.string(forKey: Keys.customShortcutName) ?? "Jot Toggle Recording"
+        // `useBuiltInRecording` defaults to true on a fresh install — that's
+        // the out-of-the-box experience. UserDefaults stores it as a Bool
+        // and `bool(forKey:)` returns false for missing keys, so detect
+        // "missing" by checking the object form.
+        if defaults.object(forKey: Keys.useBuiltInRecording) == nil {
+            self.useBuiltInRecording = true
+        } else {
+            self.useBuiltInRecording = defaults.bool(forKey: Keys.useBuiltInRecording)
+        }
         self.launchOnStartup = defaults.bool(forKey: Keys.launchOnStartup)
     }
 
@@ -101,6 +144,10 @@ final class AppSettings {
         static let watchFolderBookmark = "jot.settings.watchFolderBookmark"
         static let outputFolderBookmark = "jot.settings.outputFolderBookmark"
         static let recordingHotkey     = "jot.settings.recordingHotkey"
+        static let startShortcutName   = "jot.settings.startShortcutName"
+        static let stopShortcutName    = "jot.settings.stopShortcutName"
+        static let customShortcutName  = "jot.settings.customShortcutName"
+        static let useBuiltInRecording = "jot.settings.useBuiltInRecording"
         static let launchOnStartup     = "jot.settings.launchOnStartup"
     }
 

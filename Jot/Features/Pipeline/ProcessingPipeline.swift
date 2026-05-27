@@ -132,7 +132,15 @@ actor ProcessingPipeline {
                 outputRoot: config.outputFolder
             )
 
-            // 3. Success — log + reset state.
+            // 3. Success — clear watcher state for this path so the user can
+            // drop a new file at the same path and have it picked up. The
+            // ledger entry was the right call while the file was still
+            // sitting in the Watch Folder (prevents double-processing on a
+            // relaunch), but now the file has been moved out and the entry
+            // is moot.
+            await watcher.forget(url)
+
+            // 4. Log + reset state.
             let ms = Int(Date().timeIntervalSince(startTime) * 1000)
             onAuditEntry(.init(
                 kind: .success,

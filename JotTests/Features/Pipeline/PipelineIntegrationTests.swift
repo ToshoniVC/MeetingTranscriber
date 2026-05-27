@@ -193,6 +193,58 @@ struct PipelineIntegrationTests {
         #expect(!FileManager.default.fileExists(atPath: meeting.path(percentEncoded: false)))
     }
 
+    // MARK: - Re-drop after success
+
+    @Test
+    @MainActor
+    func sameFilenameDroppedAgainAfterSuccess_isProcessedAgain() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+
+        var counter = 0
+        MockURLProtocol.responder = { _ in
+            counter += 1
+            return Self.okResponse(body: "run \(counter)")
+        }
+
+        let (watch, output, ledger) = try Self.makeFolders()
+        defer {
+            try? FileManager.default.removeItem(at: watch)
+            try? FileManager.default.removeItem(at: output)
+        }
+        let capture = Capture()
+        let pipeline = try await Self.makePipeline(
+            watch: watch, output: output, ledger: ledger,
+            session: MockURLSession.make(),
+            capture: capture
+        )
+        try await pipeline.start()
+        defer { Task { await pipeline.stop() } }
+
+        // First drop.
+        _ = try Self.writeAudio("delta.mp3", to: watch)
+        let firstDone = await Self.waitForCondition {
+            capture.entries.filter { $0.kind == .success }.count == 1
+        }
+        #expect(firstDone, "First run should succeed. Entries: \(capture.entries.map(\.message))")
+
+        // Same filename, dropped a second time at the same Watch Folder path.
+        // After Phase 5 (this fix), the ledger no longer blocks this.
+        _ = try Self.writeAudio("delta.mp3", to: watch)
+        let secondDone = await Self.waitForCondition {
+            capture.entries.filter { $0.kind == .success }.count == 2
+        }
+        #expect(secondDone, "Second drop with same path should also succeed. Entries: \(capture.entries.map(\.message))")
+
+        // Two meeting folders: `delta` and `delta-2`.
+        #expect(FileManager.default.fileExists(
+            atPath: output.appendingPathComponent("delta").path(percentEncoded: false)
+        ))
+        #expect(FileManager.default.fileExists(
+            atPath: output.appendingPathComponent("delta-2").path(percentEncoded: false)
+        ))
+    }
+
     // MARK: - Retry path
 
     @Test

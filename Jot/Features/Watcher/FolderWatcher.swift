@@ -113,6 +113,16 @@ actor FolderWatcher {
         return stream
     }
 
+    /// Forget our record of `url` so it can be re-emitted if it appears again
+    /// at the same path. Called by the pipeline once a file is moved out of
+    /// the Watch Folder (by `FileOrganizer`) — at that point the ledger
+    /// entry is moot, and keeping it would block any new file the user
+    /// drops at the same path later.
+    func forget(_ url: URL) async {
+        await detector.forget(url)
+        try? await ledger.forget(url)
+    }
+
     /// Tear down monitoring. The `AsyncStream` returned by `start()` will end.
     func stop() {
         recheckTask?.cancel()

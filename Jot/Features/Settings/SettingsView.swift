@@ -1,17 +1,32 @@
 import SwiftUI
 
-/// Phase 0 placeholder for the Settings tab.
+/// Root view for the Settings tab. Composes the four sections defined by PRD
+/// §3.2 Tab 3:
+///   - `APIConfigSection`    (Base URL, Model String, API Key, Test connection)
+///   - `FoldersSection`      (Watch + Output folder pickers)
+///   - `HotkeySection`       (Recording hotkey recorder)
+///   - `SystemSection`       (Launch on Startup, Quit Jot)
 ///
-/// Phase 1 (Claude/implementation-plan.md §2) replaces this with the real
-/// configuration UI per PRD §3.2 Tab 3 — `APIConfigSection`, `FoldersSection`,
-/// `HotkeySection`, `SystemSection`, all backed by `AppSettings` (in `Core/`)
-/// with the API key in Keychain.
+/// The window is hosted by `MainWindow` (Core/App) — see Phase 0. This view
+/// receives `AppSettings` via the SwiftUI environment, wired in `JotApp`.
 struct SettingsView: View {
+    @Environment(AppSettings.self) private var settings
+
     var body: some View {
-        ContentUnavailableView(
-            "Settings",
-            systemImage: "gearshape",
-            description: Text("API endpoint, folders, hotkey, and launch behavior will be configured here.\n(Implementation lands in Phase 1.)")
-        )
+        ScrollView {
+            VStack(alignment: .leading, spacing: 32) {
+                APIConfigSection()
+                Divider()
+                FoldersSection()
+                Divider()
+                HotkeySection()
+                Divider()
+                SystemSection()
+            }
+            .padding(24)
+            .frame(maxWidth: 720, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .navigationTitle("Settings")
     }
 }

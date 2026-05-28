@@ -59,10 +59,10 @@ final class SystemMeetingStartPrompter: NSObject, MeetingStartPrompting, NSTextF
         NSApp.activate(ignoringOtherApps: true)
 
         let alert = NSAlert()
-        alert.messageText = "Start recording"
-        alert.informativeText = "Pick a meeting name and an organization. Optional notes are sent to the transcription endpoint as context."
-        let startButton = alert.addButton(withTitle: "Start Recording")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = "Recording in progress — add meeting details"
+        alert.informativeText = "Audio Hijack is already capturing. Pick a meeting name and organization to attach as metadata; optional notes are sent to the transcription endpoint as context. You can also skip this — the recording continues either way."
+        let startButton = alert.addButton(withTitle: "Save details")
+        alert.addButton(withTitle: "Skip")
         self.startButton = startButton
 
         // Accessory layout: vertical stack of (name field) (org popup)

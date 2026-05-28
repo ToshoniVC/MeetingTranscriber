@@ -36,16 +36,7 @@ enum AudioHijackRecordingError: Error, Equatable {
     }
 }
 
-/// Outcome of `toggleRecording()` — drives UI feedback and the menu-bar
-/// recording indicator. The `.started` case carries the full
-/// `MeetingStartInputs` so the caller (HotkeyCoordinator) can stamp the
-/// in-flight `MeetingContextStore` snapshot.
-enum RecordingAction: Equatable, Sendable {
-    case started(inputs: MeetingStartInputs)
-    case stopped
-}
-
-/// The built-in "out-of-the-box" recording toggle. Per PRD §5 the user owns
+/// The built-in "out-of-the-box" recording driver. Per PRD §5 the user owns
 /// the recording app (Audio Hijack 4); Jot only kicks off the action.
 ///
 /// Implementation: AH4 has **no AppleScript dictionary** — it exposes a
@@ -62,10 +53,13 @@ enum RecordingAction: Equatable, Sendable {
 /// URL when it tries to touch paths that don't exist inside our container.
 /// URL-scheme invocation sidesteps the issue entirely.
 ///
-/// The hotkey acts as a **toggle**: pressing it while Jot's local view says
-/// "recording" runs the stop Shortcut (no prompt). Pressing it while idle
-/// asks for a meeting name and runs the start Shortcut (the meeting name is
-/// piped to stdin so the Shortcut can use it for the recording filename).
+/// **Recording-first UX** (v0.4.1, per Backlog "start recording on hotkey
+/// press"): the hotkey runs the start Shortcut *immediately* and only then
+/// prompts for meeting metadata. The prompt is collected concurrently while
+/// AH is already capturing audio. This is why this controller is split into
+/// three single-purpose methods (`startRecording`, `stopRecording`,
+/// `collectMetadata`) rather than a single `toggleRecording` — the toggle
+/// shape couldn't model "started without metadata, metadata arrives later".
 ///
 /// Owned by `JotApp`, called by `HotkeyCoordinator` whenever
 /// `AppSettings.useBuiltInRecording == true`. The single-Shortcut custom
@@ -89,52 +83,61 @@ final class AudioHijackController {
         self.presence = presence
     }
 
-    /// Toggle Audio Hijack based on the caller's view of state:
-    ///   - `isCurrentlyRecording == true`  → run the stop Shortcut, return
-    ///     `.stopped`.
-    ///   - `isCurrentlyRecording == false` → ask for a meeting name, run the
-    ///     start Shortcut with the name on stdin, return `.started(name)`.
+    /// Run the start Shortcut now and return the wall-clock timestamp that
+    /// recording began. The caller must pass this timestamp back into
+    /// `MeetingContextStore.recordStarted(at:)` when metadata arrives later
+    /// so the time-window guard in `consume(forFileCreatedAt:)` correctly
+    /// matches the produced audio file (which may have been written before
+    /// the user finished filling in the metadata prompt).
     ///
-    /// The caller (`HotkeyCoordinator` via `MenuBarController.isRecording`)
-    /// owns the truth. We can't probe AH4 — it has no AppleScript and no
-    /// public "is recording?" intent — so we trust the caller's bookkeeping.
-    /// The trade-off: if the user toggles AH outside Jot, our state can
-    /// briefly mismatch. Pressing the hotkey one extra time self-corrects.
-    func toggleRecording(
-        isCurrentlyRecording: Bool,
-        startShortcutName: String,
-        stopShortcutName: String,
-        organizations: [Organization],
-        defaultOrgId: UUID?
-    ) async throws -> RecordingAction {
+    /// We capture `Date()` *immediately before* asking macOS to run the
+    /// Shortcut, not after — the audio file's creation date is set by AH
+    /// the moment it opens the file for writing, which is essentially
+    /// instantaneous after the URL handoff. The window guard has a couple
+    /// seconds of slop either side.
+    func startRecording(startShortcutName: String) async throws -> Date {
         guard presence.isInstalled else {
             throw AudioHijackRecordingError.audioHijackNotInstalled
         }
+        let startedAt = Date()
+        try await runShortcut(name: startShortcutName, input: nil)
+        Log.app.info("AudioHijack: start Shortcut ran")
+        return startedAt
+    }
 
-        if isCurrentlyRecording {
-            try await runShortcut(name: stopShortcutName, input: nil)
-            Log.app.info("AudioHijack: stop Shortcut ran")
-            return .stopped
+    /// Run the stop Shortcut now. Throws if AH isn't installed (defensive —
+    /// the caller usually probes presence first via the menu bar's
+    /// recording state, but startRecording could have succeeded against an
+    /// AH that was since uninstalled).
+    func stopRecording(stopShortcutName: String) async throws {
+        guard presence.isInstalled else {
+            throw AudioHijackRecordingError.audioHijackNotInstalled
         }
+        try await runShortcut(name: stopShortcutName, input: nil)
+        Log.app.info("AudioHijack: stop Shortcut ran")
+    }
 
-        // Not recording (per caller) → prompt for name + org + context + start.
-        guard let inputs = await prompter.ask(
+    /// Show the meeting-start prompt and return the user's metadata, or nil
+    /// if they cancelled. Does NOT touch Audio Hijack — recording is
+    /// expected to already be running. The caller stamps the returned
+    /// inputs into `MeetingContextStore` themselves so this method stays
+    /// dependency-free.
+    func collectMetadata(
+        organizations: [Organization],
+        defaultOrgId: UUID?
+    ) async -> MeetingStartInputs? {
+        await prompter.ask(
             organizations: organizations,
             defaultOrgId: defaultOrgId
-        ) else {
-            throw AudioHijackRecordingError.userCancelled
-        }
-        // Pass the name on stdin only if it's non-empty — saves a useless
-        // `--input-path -` argument when the user skipped the field.
-        let stdin = inputs.meetingName.isEmpty ? nil : inputs.meetingName
-        try await runShortcut(name: startShortcutName, input: stdin)
-        Log.app.info("AudioHijack: start Shortcut ran for '\(inputs.meetingName, privacy: .public)'")
-        return .started(inputs: inputs)
+        )
     }
 
     /// Force-stop the current recording (used by the menu-bar "Stop recording"
     /// action). Idempotent at the AH side — if AH wasn't recording, the
-    /// Shortcut's `Run/Stop Session → state=stopped` is a no-op.
+    /// Shortcut's `Run/Stop Session → state=stopped` is a no-op. Differs
+    /// from `stopRecording` in that it silently no-ops when AH isn't
+    /// installed (the menu-bar action shouldn't surface an error for a
+    /// nice-to-have action).
     func stopRecordingIfActive(stopShortcutName: String) async throws {
         guard presence.isInstalled else { return }
         try await runShortcut(name: stopShortcutName, input: nil)

@@ -5,6 +5,38 @@ Versions are tagged from `main` (`v0.1.0`, `v0.1.1`, …) and built/signed by
 release notes from the `<description>` element in `docs/appcast.xml`, not
 this file — this is the long-form humans-only log.
 
+## v0.3.0 — Notion meeting creation
+
+Optional delivery bridge that creates a new page in a configured Notion
+database after every successful transcript.
+
+- **New Settings → Notion section.** Toggle ("Create a Notion page after
+  each transcript"), integration token (Keychain-backed, separate
+  account from the transcription API key), target database ID, and a
+  Test connection button that runs `describeDatabase` against the
+  configured account.
+- **Three predefined toggle sections** are created on every page, in
+  the PRD-mandated order: Meeting Notes (intentionally empty for the
+  user to fill in), Meeting Transcript (the Jot transcript), Additional
+  Context (the compiled `prompt` from v0.2.x). Section names are not
+  configurable.
+- **Never blocks the core pipeline.** Notion is fired as a background
+  task *after* the success audit entry, transcript, audio move, and
+  `context.md` write all complete. A failed Notion write leaves all of
+  those untouched and lands as a tooltip on the audit row.
+- **Audit log shows the outcome.** Success rows render a tappable
+  "Notion page" link that opens the new page in the browser; failures
+  render a red triangle with the error message in a tooltip. Disabled
+  users see no extra UI noise.
+- **Schema bump.** `AuditLogEntry` schemaVersion 2 → 3 (adds
+  `notionStatus`). v1 and v2 entries on disk decode cleanly with
+  `notionStatus = nil`.
+- **Notion REST, not MCP.** Despite "MCP" in the PRD wording, the
+  shipping implementation talks to `api.notion.com` directly via
+  `URLSession` — no third-party SDK, no sidecar process, no extra
+  sandbox entitlements. The label in Settings is "Notion connection"
+  to keep the door open for an MCP-shaped transport later if needed.
+
 ## v0.2.1 — Start-flow polish
 
 Two small fixes to the v0.2.0 Context flow, per first-day usage:

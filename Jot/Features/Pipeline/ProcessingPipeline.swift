@@ -27,6 +27,21 @@ struct PipelineConfig: Sendable, Equatable {
     }
 }
 
+/// How the pipeline should treat Notion post-success. Snapshotted at
+/// pipeline-start time so a mid-pipeline settings change doesn't change
+/// the per-file behavior — the coordinator restarts on any change.
+enum NotionPipelineMode: Sendable {
+    /// User opted out (toggle off) or the config didn't pass validation.
+    /// The success audit entry is written with
+    /// `notionStatus = .skipped(reason)` and no network call happens.
+    case skip(reason: NotionStatus.SkipReason)
+
+    /// Wire the Notion writer. The pipeline writes the success entry
+    /// with `notionStatus = .pending`, fires a `Task` to call the
+    /// writer, and surfaces the outcome via `onNotionStatusChange`.
+    case attempt(config: NotionConfig, writer: any NotionMeetingWriter)
+}
+
 /// Orchestrates the watch → transcribe → organize flow.
 ///
 /// Runs as an `actor` so its mutable state (current file, queue) is
@@ -58,8 +73,24 @@ actor ProcessingPipeline {
     /// the prompt-compile + send step using the same snapshot.
     private let consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)?
 
+    /// How to handle Notion post-success — either skip with a recorded
+    /// reason or attempt the write via the supplied writer. Nil means
+    /// the pipeline isn't Notion-aware at all (test harnesses default);
+    /// in that case `notionStatus` on entries stays nil.
+    private let notionMode: NotionPipelineMode?
+
+    /// Called when an in-flight Notion task resolves — `(entryId, finalStatus)`.
+    /// Hosts (the coordinator) update the corresponding audit entry's
+    /// `notionStatus` in the store. Ignored when `notionMode == nil`.
+    private let onNotionStatusChange: (@Sendable (UUID, NotionStatus) -> Void)?
+
     private var running = false
     private var consumerTask: Task<Void, Never>?
+
+    /// In-flight Notion tasks, keyed by their meeting-entry id, so we can
+    /// cancel them on `stop()` without leaking writes that outlive the
+    /// pipeline.
+    private var notionTasks: [UUID: Task<Void, Never>] = [:]
 
     init(
         config: PipelineConfig,
@@ -68,7 +99,9 @@ actor ProcessingPipeline {
         fileOrganizer: FileOrganizer = FileOrganizer(),
         onStateChange: @escaping @Sendable (PipelineState) -> Void,
         onAuditEntry: @escaping @Sendable (AuditLogEntry) -> Void,
-        consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)? = nil
+        consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)? = nil,
+        notionMode: NotionPipelineMode? = nil,
+        onNotionStatusChange: (@Sendable (UUID, NotionStatus) -> Void)? = nil
     ) {
         self.config = config
         self.watcher = watcher
@@ -77,6 +110,8 @@ actor ProcessingPipeline {
         self.onStateChange = onStateChange
         self.onAuditEntry = onAuditEntry
         self.consumeMeetingContext = consumeMeetingContext
+        self.notionMode = notionMode
+        self.onNotionStatusChange = onNotionStatusChange
     }
 
     // MARK: - Lifecycle
@@ -110,6 +145,12 @@ actor ProcessingPipeline {
         running = false
         consumerTask?.cancel()
         consumerTask = nil
+        // Cancel any in-flight Notion writes so they don't outlive us.
+        // Cancelled tasks deliberately do not emit `onNotionStatusChange`
+        // — the meeting itself was already logged as a success; a
+        // cancelled Notion write is silent.
+        for task in notionTasks.values { task.cancel() }
+        notionTasks.removeAll()
         await watcher.stop()
         onStateChange(.notConfigured)
     }
@@ -176,18 +217,47 @@ actor ProcessingPipeline {
             // is moot.
             await watcher.forget(workingURL)
 
-            // 4. Log + reset state.
+            // 4. Log + reset state. Notion-aware pipelines stamp the
+            // initial `notionStatus` on the entry — either `.pending`
+            // (we're about to attempt the write) or `.skipped(reason)`.
+            // The `.pending` row gets updated in place when the async
+            // task in step 5 resolves.
             let ms = Int(Date().timeIntervalSince(startTime) * 1000)
+            let entryId = UUID()
+            let initialStatus = initialNotionStatus()
             onAuditEntry(.init(
+                id: entryId,
                 kind: .success,
                 sourcePath: workingURL.path(percentEncoded: false),
                 message: "Transcribed and filed → \(meetingFolder.lastPathComponent)",
                 durationMs: ms,
                 retryable: false,
                 contextAttached: prompt != nil,
-                organizationName: snapshot?.organizationName
+                organizationName: snapshot?.organizationName,
+                notionStatus: initialStatus
             ))
             onStateChange(.idle)
+
+            // 5. Fire the Notion write as a background task on success
+            // *only* in `.attempt` mode. The main pipeline returns to
+            // idle immediately — Notion never blocks the success path.
+            if case .attempt(let notionConfig, let writer) = notionMode {
+                // Source the meeting name + additional context from the
+                // recording snapshot when we have one; fall back to the
+                // audio basename + empty context for files that arrived
+                // outside a Jot-kicked session.
+                let meetingName = snapshot?.meetingName
+                    ?? workingURL.deletingPathExtension().lastPathComponent
+                let additionalContext = snapshot?.resolvedCompiledContext ?? ""
+                scheduleNotionWrite(
+                    entryId: entryId,
+                    config: notionConfig,
+                    writer: writer,
+                    meetingName: meetingName,
+                    transcript: transcript,
+                    additionalContext: additionalContext
+                )
+            }
 
         } catch let error as TranscriptionError {
             recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
@@ -332,5 +402,67 @@ actor ProcessingPipeline {
         if running {
             onStateChange(.error(config.watchFolder, "Watch folder became unreachable"))
         }
+    }
+
+    // MARK: - Notion post-success
+
+    /// Initial `notionStatus` stamped on the success entry — driven by
+    /// the pipeline's mode, not by anything per-file. Returns nil when
+    /// the pipeline isn't Notion-aware at all (test default), so legacy
+    /// rows stay shape-compatible.
+    private func initialNotionStatus() -> NotionStatus? {
+        switch notionMode {
+        case .none:
+            return nil
+        case .skip(let reason):
+            return .skipped(reason: reason)
+        case .attempt:
+            return .pending
+        }
+    }
+
+    /// Kick off the Notion write in the background. When it completes
+    /// (success, typed error, or transport error), surface the outcome
+    /// via `onNotionStatusChange` so the audit row is updated in place.
+    /// Cancellation during `stop()` is silent by design.
+    private func scheduleNotionWrite(
+        entryId: UUID,
+        config notionConfig: NotionConfig,
+        writer: any NotionMeetingWriter,
+        meetingName: String,
+        transcript: String,
+        additionalContext: String
+    ) {
+        let task = Task { [weak self] in
+            let outcome: NotionStatus
+            do {
+                let result = try await writer.createMeetingPage(
+                    config: notionConfig,
+                    meetingName: meetingName,
+                    transcript: transcript,
+                    additionalContext: additionalContext
+                )
+                outcome = .succeeded(pageURL: result.url)
+                Log.notion.info("Notion page created → \(result.url.absoluteString, privacy: .public)")
+            } catch is CancellationError {
+                return
+            } catch let error as NotionError {
+                outcome = .failed(message: error.userFacingMessage)
+                Log.notion.error("Notion write failed: \(error.userFacingMessage, privacy: .public)")
+            } catch {
+                outcome = .failed(message: error.localizedDescription)
+                Log.notion.error("Notion write failed: \(error.localizedDescription, privacy: .public)")
+            }
+            // Hand the outcome back to the host and drop our task handle.
+            self?.onNotionStatusChange?(entryId, outcome)
+            await self?.clearNotionTask(entryId)
+        }
+        notionTasks[entryId] = task
+    }
+
+    /// Internal helper for `scheduleNotionWrite`'s completion path — runs
+    /// on the actor so the dictionary mutation is serialized.
+    private func clearNotionTask(_ entryId: UUID) {
+        notionTasks[entryId] = nil
     }
 }

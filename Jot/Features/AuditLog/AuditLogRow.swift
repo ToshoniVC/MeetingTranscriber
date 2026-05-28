@@ -46,6 +46,8 @@ struct AuditLogRow: View {
                             .foregroundStyle(.secondary)
                             .font(.caption)
                     }
+
+                    notionDescription
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -77,6 +79,46 @@ struct AuditLogRow: View {
             return "Context: yes"
         }
         return "Context: no"
+    }
+
+    /// Compact "Notion: …" suffix for success rows. The disabled-skip
+    /// case intentionally renders nothing — the default-user UX shouldn't
+    /// be nagged for choosing not to use Notion. `.succeeded` renders as
+    /// a tappable link that opens the page in the user's browser;
+    /// `.failed` shows the error text with a triangle icon.
+    @ViewBuilder
+    private var notionDescription: some View {
+        switch entry.notionStatus {
+        case .none, .skipped(.disabled):
+            EmptyView()
+        case .skipped(.misconfigured):
+            Text("• Notion: setup needed")
+                .foregroundStyle(.orange)
+                .font(.caption)
+        case .pending:
+            HStack(spacing: 4) {
+                Text("•")
+                    .foregroundStyle(.secondary)
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Notion…")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+        case .succeeded(let pageURL):
+            HStack(spacing: 4) {
+                Text("•")
+                    .foregroundStyle(.secondary)
+                Link("Notion page", destination: pageURL)
+                    .foregroundStyle(.blue)
+            }
+            .font(.caption)
+        case .failed(let message):
+            Label("Notion: failed", systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.red)
+                .font(.caption)
+                .help(message)
+        }
     }
 
     private var kindSystemImage: String {

@@ -20,4 +20,5 @@ enum Log {
     static let transcription = Logger(subsystem: subsystem, category: "transcription")
     static let pipeline      = Logger(subsystem: subsystem, category: "pipeline")
     static let settings      = Logger(subsystem: subsystem, category: "settings")
+    static let notion        = Logger(subsystem: subsystem, category: "notion")
 }

@@ -71,8 +71,19 @@ final class AuditLogStore {
             durationMs: original.durationMs,
             retryable: false,
             contextAttached: original.contextAttached,
-            organizationName: original.organizationName
+            organizationName: original.organizationName,
+            notionStatus: original.notionStatus
         )
+        persist()
+    }
+
+    /// Replace the `notionStatus` of the entry with `id`. Used by the
+    /// Pipeline's post-success Notion task once the async write
+    /// completes. No-op if no entry matches — the entry may have been
+    /// cleared from the log while the write was in flight.
+    func updateNotionStatus(_ status: NotionStatus?, forEntry id: UUID) {
+        guard let idx = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[idx] = entries[idx].withNotionStatus(status)
         persist()
     }
 

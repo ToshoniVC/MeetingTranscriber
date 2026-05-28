@@ -3,11 +3,12 @@ import Foundation
 /// One row in the Audit Log tab (PRD §3.2 Tab 2). Codable so the
 /// `AuditLogStore` can persist the whole log to disk and survive relaunches.
 ///
-/// **Schema v2** (Phase G): adds `contextAttached` and `organizationName`.
-/// Both are Optional so v1 entries on disk decode cleanly without a
-/// migration step — `init(from:)` defaults `schemaVersion` to 1 when
-/// absent, and the auto-synthesized decode treats missing Optional fields
-/// as nil. New entries always write `schemaVersion: 2`.
+/// **Schema v3** (Create Notion Meeting feature): adds `notionStatus`.
+/// **Schema v2** (Add Context feature): adds `contextAttached` and
+/// `organizationName`. All three new fields are Optional so legacy
+/// entries on disk decode cleanly without a separate migration step.
+/// The hand-rolled `init(from:)` defaults `schemaVersion` to 1 when
+/// absent. New entries always write the current schemaVersion.
 struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
         case info
@@ -33,9 +34,17 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
     /// and for v1-schema rows.
     let organizationName: String?
 
-    /// On-disk schema version. Bumped to 2 in Phase G. New entries default
-    /// to the current value; legacy rows decode as 1 (treated as
-    /// "pre-Add-Context").
+    /// Outcome of the Notion bridge for this meeting. `nil` for non-
+    /// pipeline rows, for v1/v2-schema rows, and for pipelines that
+    /// weren't aware of Notion at all (tests). Mutable through
+    /// `AuditLogStore.updateNotionStatus(...)` so the row can flip from
+    /// `.pending` to `.succeeded` / `.failed` once the async write
+    /// completes.
+    let notionStatus: NotionStatus?
+
+    /// On-disk schema version. Bumped from 2 → 3 for `notionStatus`.
+    /// New entries default to the current value; legacy rows decode as
+    /// 1 (pre-Add-Context).
     let schemaVersion: Int
 
     init(
@@ -48,7 +57,8 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         retryable: Bool = false,
         contextAttached: Bool? = nil,
         organizationName: String? = nil,
-        schemaVersion: Int = 2
+        notionStatus: NotionStatus? = nil,
+        schemaVersion: Int = 3
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -59,13 +69,13 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         self.retryable = retryable
         self.contextAttached = contextAttached
         self.organizationName = organizationName
+        self.notionStatus = notionStatus
         self.schemaVersion = schemaVersion
     }
 
-    /// Custom decoder so legacy v1 JSON (which has no `schemaVersion`,
-    /// `contextAttached`, or `organizationName` keys) loads cleanly.
-    /// Auto-synthesized decode would crash on the missing required
-    /// `schemaVersion` field; this hand-rolled init defaults it to 1.
+    /// Custom decoder so legacy v1/v2 JSON (which lack one or more of the
+    /// fields below) loads cleanly. Missing Optional fields decode as nil;
+    /// missing `schemaVersion` defaults to 1 (the original on-disk shape).
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try c.decode(UUID.self, forKey: .id)
@@ -77,6 +87,26 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         self.retryable = try c.decodeIfPresent(Bool.self, forKey: .retryable) ?? false
         self.contextAttached = try c.decodeIfPresent(Bool.self, forKey: .contextAttached)
         self.organizationName = try c.decodeIfPresent(String.self, forKey: .organizationName)
+        self.notionStatus = try c.decodeIfPresent(NotionStatus.self, forKey: .notionStatus)
         self.schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+    }
+
+    /// Return a copy of this entry with `notionStatus` replaced. Used by
+    /// `AuditLogStore.updateNotionStatus(...)` after the async Notion
+    /// write completes (or fails). Other fields are immutable by design.
+    func withNotionStatus(_ status: NotionStatus?) -> AuditLogEntry {
+        AuditLogEntry(
+            id: id,
+            timestamp: timestamp,
+            kind: kind,
+            sourcePath: sourcePath,
+            message: message,
+            durationMs: durationMs,
+            retryable: retryable,
+            contextAttached: contextAttached,
+            organizationName: organizationName,
+            notionStatus: status,
+            schemaVersion: schemaVersion
+        )
     }
 }

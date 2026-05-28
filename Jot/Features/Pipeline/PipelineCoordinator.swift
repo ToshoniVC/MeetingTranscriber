@@ -100,10 +100,12 @@ final class PipelineCoordinator {
                 _ = settings.outputFolderBookmark
                 _ = settings.apiBaseURL
                 _ = settings.modelString
-                // apiKey is computed (Keychain-backed), so it's not
-                // observable. We rely on the user clicking through the UI
-                // for key changes; restart by user action via the toggle
-                // we'll add or by quit + relaunch.
+                _ = settings.notionEnabled
+                _ = settings.notionDatabaseId
+                // apiKey and notionToken are Keychain-backed (not
+                // observable). Token changes require the user to flip the
+                // notionEnabled toggle off+on, or quit/relaunch — same
+                // shape as the existing apiKey story.
             } onChange: {
                 continuation.resume()
             }
@@ -150,6 +152,8 @@ final class PipelineCoordinator {
             } else {
                 consumeMeetingContext = nil
             }
+            let notionMode = makeNotionMode()
+            let auditLog = self.auditLog
             let pipeline = ProcessingPipeline(
                 config: config,
                 watcher: watcher,
@@ -163,7 +167,13 @@ final class PipelineCoordinator {
                         self?.auditLog.append(entry)
                     }
                 },
-                consumeMeetingContext: consumeMeetingContext
+                consumeMeetingContext: consumeMeetingContext,
+                notionMode: notionMode,
+                onNotionStatusChange: { entryId, status in
+                    Task { @MainActor in
+                        auditLog.updateNotionStatus(status, forEntry: entryId)
+                    }
+                }
             )
             try await pipeline.start()
             self.pipeline = pipeline
@@ -222,6 +232,22 @@ final class PipelineCoordinator {
             model: model,
             apiKey: apiKey
         )
+    }
+
+    /// Decide whether the current `AppSettings` lets the pipeline attempt
+    /// a Notion write per meeting. Falls through `NotionValidation`:
+    /// `.ready` → `.attempt` with a fresh `NotionClient`; `.disabled` and
+    /// `.misconfigured` → `.skip(reason)` so the audit log records why
+    /// the write didn't happen.
+    private func makeNotionMode() -> NotionPipelineMode {
+        switch NotionValidation.validate(settings) {
+        case .disabled:
+            return .skip(reason: .disabled)
+        case .misconfigured:
+            return .skip(reason: .misconfigured)
+        case .ready(let config):
+            return .attempt(config: config, writer: NotionClient())
+        }
     }
 
     private func resolveBookmark(_ data: Data) -> URL? {

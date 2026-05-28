@@ -23,6 +23,7 @@ struct JotApp: App {
     @State private var errorInspector: ErrorInspector
     @State private var debugMode: DebugMode
     @State private var updater: SparkleUpdater
+    @State private var manualUpload: ManualUploadCoordinator
 
     init() {
         let menuBar = MenuBarController()
@@ -74,6 +75,12 @@ struct JotApp: App {
         let errorInspector = ErrorInspector()
         let debugMode = DebugMode()
         let updater = SparkleUpdater()
+        let manualUpload = ManualUploadCoordinator(
+            settings: settings,
+            auditLog: auditLog,
+            organizations: organizations,
+            meetingContextStore: meetingContextStore
+        )
         self._menuBar = State(initialValue: menuBar)
         self._settings = State(initialValue: settings)
         self._auditLog = State(initialValue: auditLog)
@@ -88,6 +95,7 @@ struct JotApp: App {
         self._errorInspector = State(initialValue: errorInspector)
         self._debugMode = State(initialValue: debugMode)
         self._updater = State(initialValue: updater)
+        self._manualUpload = State(initialValue: manualUpload)
 
         // Bootstrap at process launch, not at MainWindow appearance.
         // LSUIElement = YES means launching as a Login Item never opens the
@@ -147,6 +155,7 @@ struct JotApp: App {
                 .environment(errorInspector)
                 .environment(debugMode)
                 .environment(updater)
+                .environment(manualUpload)
                 .frame(minWidth: 760, minHeight: 480)
         }
         .windowResizability(.contentMinSize)

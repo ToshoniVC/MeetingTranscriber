@@ -11,6 +11,7 @@ import AppKit
 struct TranscriptsView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(AuditLogStore.self) private var auditLog
+    @Environment(ManualUploadCoordinator.self) private var upload
     @State private var viewModel = TranscriptsViewModel()
 
     /// Folder targeted for rename, plus the in-flight name draft. Drives the
@@ -60,6 +61,13 @@ struct TranscriptsView: View {
                 Text("'\(folder.name)' will be moved to your Trash.")
             }
         }
+        .alert("Upload failed", isPresented: uploadErrorBinding) {
+            Button("OK", role: .cancel) { upload.dismissFailure() }
+        } message: {
+            if case .failed(let message) = upload.status {
+                Text(message)
+            }
+        }
     }
 
     // MARK: - Pieces
@@ -72,7 +80,21 @@ struct TranscriptsView: View {
             if viewModel.isLoading {
                 ProgressView().controlSize(.small).padding(.leading, 6)
             }
+            if let uploadLabel {
+                ProgressView().controlSize(.small).padding(.leading, 6)
+                Text(uploadLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
+            Button {
+                Task { await upload.beginUpload() }
+            } label: {
+                Label("Upload Recording…", systemImage: "square.and.arrow.up")
+            }
+            .controlSize(.small)
+            .disabled(!canUpload)
+            .help(uploadHelp)
             if outputFolder != nil {
                 Button {
                     if let url = outputFolder { viewModel.revealInFinder(url) }
@@ -90,6 +112,35 @@ struct TranscriptsView: View {
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 12)
+    }
+
+    private var canUpload: Bool {
+        settings.watchFolderBookmark != nil && !upload.status.isBusy
+    }
+
+    private var uploadHelp: String {
+        if settings.watchFolderBookmark == nil {
+            return "Pick a Watch Folder in Settings before uploading."
+        }
+        switch upload.status {
+        case .idle, .failed:
+            return "Pick an .mp3 or .mp4 file to process as if it were a fresh recording."
+        case .collectingMetadata:
+            return "Waiting for meeting details…"
+        case .converting(let filename):
+            return "Extracting audio from \(filename)…"
+        case .staging(let filename):
+            return "Copying \(filename) into the Watch Folder…"
+        }
+    }
+
+    private var uploadLabel: String? {
+        switch upload.status {
+        case .idle, .failed: return nil
+        case .collectingMetadata: return "Awaiting meeting details…"
+        case .converting(let filename): return "Extracting audio from \(filename)…"
+        case .staging(let filename): return "Staging \(filename)…"
+        }
     }
 
     @ViewBuilder
@@ -199,6 +250,16 @@ struct TranscriptsView: View {
         Binding(
             get: { confirmingDelete != nil },
             set: { if !$0 { confirmingDelete = nil } }
+        )
+    }
+
+    private var uploadErrorBinding: Binding<Bool> {
+        Binding(
+            get: {
+                if case .failed = upload.status { return true }
+                return false
+            },
+            set: { if !$0 { upload.dismissFailure() } }
         )
     }
 

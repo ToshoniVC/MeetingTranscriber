@@ -36,8 +36,9 @@ struct CurrentMeetingEditingIntegrationTests {
             at: editTime
         )
 
-        // File arrives a few seconds later, well inside the recording window.
-        let fileCreated = started.addingTimeInterval(60)
+        // File arrives a few seconds later, well inside the recording window
+        // (between start and now — recording is still active, no stop).
+        let fileCreated = started.addingTimeInterval(30)
         let snapshot = store.consume(
             forFileCreatedAt: fileCreated,
             now: editTime.addingTimeInterval(10)

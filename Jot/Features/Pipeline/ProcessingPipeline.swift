@@ -128,14 +128,25 @@ actor ProcessingPipeline {
         let startTime = Date()
         onStateChange(.processing(url))
 
-        // 0. If this file's creation date falls inside an active Jot-driven
-        // recording window, rename it to the meeting name the user typed.
-        // The watcher hands us timestamp-named files from AH regardless of
-        // who started the session — the time-window guard in
-        // `MeetingNameStore` ensures we only rename files we know are ours.
+        // 0a. If this file's creation date falls inside an active Jot-driven
+        // recording window, pull the snapshot we'll use for both renaming
+        // and the Whisper `prompt` field. The time-window guard inside
+        // `MeetingContextStore.consume` ensures we only claim a snapshot
+        // for files we know came from a Jot-kicked session.
+        let snapshot = await consumeSnapshotForFile(at: url)
+
+        // 0b. Rename to the user-typed meeting name when one is available.
         // Best-effort: a failed rename falls back to the original URL so
         // transcription still happens.
-        let workingURL = await renameIfMeetingNamePending(url) ?? url
+        let workingURL = await renameIfNeeded(url, with: snapshot) ?? url
+
+        // 0c. Pull the compiled prompt off the snapshot. Empty string and
+        // nil collapse to nil — the transcription client omits the field
+        // entirely in that case, matching pre-Add-Context behaviour.
+        let prompt = snapshot
+            .map(\.resolvedCompiledContext)
+            .flatMap { $0.isEmpty ? nil : $0 }
+        Log.pipeline.info("Prompt attached: \(prompt != nil ? "yes" : "no", privacy: .public)")
 
         do {
             // 1. Transcribe.
@@ -143,7 +154,8 @@ actor ProcessingPipeline {
                 audio: workingURL,
                 baseURL: config.apiBaseURL,
                 model: config.model,
-                apiKey: config.apiKey
+                apiKey: config.apiKey,
+                prompt: prompt
             )
 
             // 2. Organize: per-meeting folder + transcript + move audio.
@@ -184,15 +196,23 @@ actor ProcessingPipeline {
         }
     }
 
-    /// Try to rename `url` to the meeting name the user typed at the start
-    /// prompt. Returns the new URL on success, or nil if no rename happened
-    /// (no pending meeting, creation date outside the window, sanitized name
-    /// empty, or the actual `moveItem` failed). Never throws — rename is
-    /// strictly best-effort and must not block transcription.
-    private func renameIfMeetingNamePending(_ url: URL) async -> URL? {
+    /// Ask `consumeMeetingContext` for a snapshot matching `url`'s creation
+    /// date. Returns nil if no callback is wired, no creation date is
+    /// readable, or no snapshot matches (file came from outside a
+    /// Jot-driven session). Side effect: a successful consume clears the
+    /// store's pending entry — we can only spend it once.
+    private func consumeSnapshotForFile(at url: URL) async -> MeetingContextSnapshot? {
         guard let consume = consumeMeetingContext else { return nil }
         guard let creationDate = fileCreationDate(of: url) else { return nil }
-        guard let snapshot = await consume(creationDate) else { return nil }
+        return await consume(creationDate)
+    }
+
+    /// Try to rename `url` to the snapshot's meeting name. Returns the new
+    /// URL on success, or nil if no rename happened (no snapshot, sanitized
+    /// name empty, or the actual `moveItem` failed). Never throws — rename
+    /// is strictly best-effort and must not block transcription.
+    private func renameIfNeeded(_ url: URL, with snapshot: MeetingContextSnapshot?) async -> URL? {
+        guard let snapshot else { return nil }
         guard let safeName = MeetingContextStore.sanitizedFilenameComponent(snapshot.meetingName) else { return nil }
 
         let parent = url.deletingLastPathComponent()

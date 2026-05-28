@@ -66,6 +66,7 @@
 		7362C0DC9E5C68415C05007C /* MeetingContextStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93926781707E170A6D578293 /* MeetingContextStore.swift */; };
 		78A4EA0D57294E80499D261D /* Log.swift in Sources */ = {isa = PBXBuildFile; fileRef = B29B601640530CAB3CDD3925 /* Log.swift */; };
 		7945F40F0E0D5B1B49D38416 /* EndToEndIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34AA6CF1A547837C46055D56 /* EndToEndIntegrationTests.swift */; };
+		7A38DD8D64F55EFA61CFF1E8 /* FakeNotionMeetingWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4D44D0BE0DCA7A620685D40 /* FakeNotionMeetingWriter.swift */; };
 		7AF5C27224D39E09E73ADDB9 /* LoginItemControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63F09C2FFA0D35CD63FD6833 /* LoginItemControllerTests.swift */; };
 		7FEBF8449A347B30AB62E554 /* SettingsFeatureSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54ACE6CD87EB510571F413C2 /* SettingsFeatureSmokeTests.swift */; };
 		809AEF38FED38636F76D6CC9 /* ContextCompilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFEE911E36C438017A76E1D7 /* ContextCompilerTests.swift */; };
@@ -85,6 +86,7 @@
 		9F0D64186C19EC81EFFB3494 /* ErrorInspectorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C84DF0EC584BDA330A171210 /* ErrorInspectorView.swift */; };
 		A2B747F61B514A47A4B894D1 /* TranscriptionError.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE3DA5B94EC022A41E0B2FA2 /* TranscriptionError.swift */; };
 		A5045AFC90761DF71B399142 /* LoginItemController.swift in Sources */ = {isa = PBXBuildFile; fileRef = E04F2CEE8ECD78A7D007FF39 /* LoginItemController.swift */; };
+		A6A6FC1FBD4EB59B38D0B73E /* ProcessingPipelineNotionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBC06B092EB7E2F6686BF12B /* ProcessingPipelineNotionTests.swift */; };
 		A87431471622FF181491D3C3 /* MeetingStartInputs.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1C339504980873040A57243 /* MeetingStartInputs.swift */; };
 		A9E6BABCD6C1E6792400A6A8 /* MeetingStartPrompter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68559F817B92B676B8947AA9 /* MeetingStartPrompter.swift */; };
 		ABF46D2D679BD3DF50A1E6D7 /* AuditLogEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1496A58E4D80E63C3314D709 /* AuditLogEntry.swift */; };
@@ -121,10 +123,12 @@
 		DE0FE5510327FF64C7EAB5F9 /* OrganizationsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D98B6DCC6159624129E01417 /* OrganizationsView.swift */; };
 		E045D0839B5B7BF3A6ACB29E /* EphemeralUserDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF7C349C6EB555B97BFA6D2C /* EphemeralUserDefaults.swift */; };
 		E1EC0D6867329BE480D1681B /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF5852AA7796E4BAEF5AB484 /* SettingsView.swift */; };
+		E394DA09A7BF0B035662D498 /* NotionStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3F63F63325E13C0982EDB1A /* NotionStatus.swift */; };
 		E627399561B1AC9DAB0B0408 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = F187B23939AA107083CC8A68 /* Sparkle */; };
 		E8C8059E488F6BA42C8D9694 /* DebugMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7BCEB820CED1AD51E75B3BBB /* DebugMode.swift */; };
 		E8FF0493F280995EED5CEAEB /* NotionPagePayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA782946750D9DEA55107CF /* NotionPagePayload.swift */; };
 		E994126055B69EC0E078CD8B /* TranscriptsViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A628D7CE4C84433FD80A1F1F /* TranscriptsViewModel.swift */; };
+		EB424A242D2332DBFDFF5B95 /* AuditLogStoreNotionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9E4E90BB65371C6ADE6DAF3 /* AuditLogStoreNotionTests.swift */; };
 		EB93CE7149E8874BF383B3B8 /* NotionPageBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE385C18A6EB5FD953A55E6F /* NotionPageBuilderTests.swift */; };
 		EC3C0A026717156DE4F4E405 /* HotkeyRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3655D3BF86D9C2822621BF58 /* HotkeyRegistrar.swift */; };
 		F3DDE8F0C48071E18289DEF9 /* PipelineIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6FD0A84281D5E1073A427A /* PipelineIntegrationTests.swift */; };
@@ -193,6 +197,7 @@
 		54ACE6CD87EB510571F413C2 /* SettingsFeatureSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsFeatureSmokeTests.swift; sourceTree = "<group>"; };
 		55150BB151646F699DEA1E9C /* MenuBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarController.swift; sourceTree = "<group>"; };
 		57CBEEB128198DC8D2EC31AB /* AppVersionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppVersionTests.swift; sourceTree = "<group>"; };
+		5815D183023E9F6D9C52A5BE /* ManualUpload_PRD_2026_05_28.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = ManualUpload_PRD_2026_05_28.md; sourceTree = "<group>"; };
 		584B402E54D50A00F4CF479E /* ContextCompilerBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextCompilerBudget.swift; sourceTree = "<group>"; };
 		5B961E8867412B55ACBEB9EB /* OrganizationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizationStore.swift; sourceTree = "<group>"; };
 		5E1750C6E87DC2147D8377B2 /* StubMeetingStartPrompter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StubMeetingStartPrompter.swift; sourceTree = "<group>"; };
@@ -263,6 +268,7 @@
 		B1B9339643FC3CFAAF11D16F /* AudioHijackBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioHijackBlock.swift; sourceTree = "<group>"; };
 		B1C339504980873040A57243 /* MeetingStartInputs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingStartInputs.swift; sourceTree = "<group>"; };
 		B29B601640530CAB3CDD3925 /* Log.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Log.swift; sourceTree = "<group>"; };
+		B3F63F63325E13C0982EDB1A /* NotionStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotionStatus.swift; sourceTree = "<group>"; };
 		B418CE014EE8966E75A279BE /* ProcessedFilesLedgerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessedFilesLedgerTests.swift; sourceTree = "<group>"; };
 		B55A106540854AF87509629B /* ErrorInspectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorInspectorTests.swift; sourceTree = "<group>"; };
 		B56F25A5CF658067BBAF845F /* extensions.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = extensions.json; sourceTree = "<group>"; };
@@ -274,6 +280,7 @@
 		C365A5583904424FBDE8A9F9 /* OrganizationValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizationValidation.swift; sourceTree = "<group>"; };
 		C47C04845FCB9ED5E44C2103 /* NotionError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotionError.swift; sourceTree = "<group>"; };
 		C519F9CF84187BD497A1BA35 /* SupportedAudioTypeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupportedAudioTypeTests.swift; sourceTree = "<group>"; };
+		C593A05ED6B0F93CDE267D9A /* CodeReview_Feedback_2026_05_28.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CodeReview_Feedback_2026_05_28.md; sourceTree = "<group>"; };
 		C84DF0EC584BDA330A171210 /* ErrorInspectorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorInspectorView.swift; sourceTree = "<group>"; };
 		CC9A6D59ED6C7C2BD6977C0B /* CLAUDE.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = CLAUDE.md; sourceTree = "<group>"; };
 		CF7C349C6EB555B97BFA6D2C /* EphemeralUserDefaults.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EphemeralUserDefaults.swift; sourceTree = "<group>"; };
@@ -282,7 +289,9 @@
 		D91746CCF9ADAEE0ED96867C /* APIConfigSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIConfigSection.swift; sourceTree = "<group>"; };
 		D98B6DCC6159624129E01417 /* OrganizationsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizationsView.swift; sourceTree = "<group>"; };
 		D9BAB30896C6063034BED577 /* .gitignore */ = {isa = PBXFileReference; path = .gitignore; sourceTree = "<group>"; };
+		D9E4E90BB65371C6ADE6DAF3 /* AuditLogStoreNotionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuditLogStoreNotionTests.swift; sourceTree = "<group>"; };
 		DA7DE2FAD0613AA70E1E03BF /* FileOrganizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileOrganizerTests.swift; sourceTree = "<group>"; };
+		DBC06B092EB7E2F6686BF12B /* ProcessingPipelineNotionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingPipelineNotionTests.swift; sourceTree = "<group>"; };
 		DD904737C73D933987E7FA62 /* FolderWatcherIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderWatcherIntegrationTests.swift; sourceTree = "<group>"; };
 		DE422C52097ADA78653A6A23 /* MeetingContextSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingContextSnapshotTests.swift; sourceTree = "<group>"; };
 		DE78579A0770A9187E23B3EF /* MeetingFolder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingFolder.swift; sourceTree = "<group>"; };
@@ -301,6 +310,7 @@
 		EE385C18A6EB5FD953A55E6F /* NotionPageBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotionPageBuilderTests.swift; sourceTree = "<group>"; };
 		EE760F18033D66D954F7CF78 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		EF6FD43A40A3969B3D43637B /* NotionValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotionValidation.swift; sourceTree = "<group>"; };
+		F4D44D0BE0DCA7A620685D40 /* FakeNotionMeetingWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakeNotionMeetingWriter.swift; sourceTree = "<group>"; };
 		F91CC4B1DBFCD101830B93F5 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		FA2061D47F5C2898662DF08B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		FD1F69306197E96589E63350 /* FakeHotkeyRegistrar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakeHotkeyRegistrar.swift; sourceTree = "<group>"; };
@@ -566,6 +576,7 @@
 			isa = PBXGroup;
 			children = (
 				ED7F7D89E177E561577A3FFF /* AuditLogEntryTests.swift */,
+				D9E4E90BB65371C6ADE6DAF3 /* AuditLogStoreNotionTests.swift */,
 				0D24EB93716734CA8BF8BF12 /* AuditLogStoreTests.swift */,
 			);
 			path = AuditLog;
@@ -580,6 +591,7 @@
 				89019A012263DB9A106180B6 /* MeetingFolderTimestampTests.swift */,
 				95F9E11967B48E4D9666D28C /* PipelineCoordinatorTests.swift */,
 				1C6FD0A84281D5E1073A427A /* PipelineIntegrationTests.swift */,
+				DBC06B092EB7E2F6686BF12B /* ProcessingPipelineNotionTests.swift */,
 			);
 			path = Pipeline;
 			sourceTree = "<group>";
@@ -782,6 +794,7 @@
 				CF7C349C6EB555B97BFA6D2C /* EphemeralUserDefaults.swift */,
 				FD1F69306197E96589E63350 /* FakeHotkeyRegistrar.swift */,
 				6731DA96C0D07E749082ACE9 /* FakeLoginItemControlling.swift */,
+				F4D44D0BE0DCA7A620685D40 /* FakeNotionMeetingWriter.swift */,
 				1E486522DE41FE6A2FC00432 /* InMemoryKeychain.swift */,
 				287757359CA389D80C39B9B5 /* MockURLProtocol.swift */,
 				8F11100474748353695B5D13 /* RecordingURLOpener.swift */,
@@ -850,8 +863,10 @@
 			children = (
 				5F548A24349D9E9FDB1F3694 /* archive */,
 				B67204B05050DB0247030871 /* Backlog.md */,
+				C593A05ED6B0F93CDE267D9A /* CodeReview_Feedback_2026_05_28.md */,
 				8ED762D76E34859DC12CC07F /* CreateClaudeCodeMeetingNotes_PRD_2026_05_28.md */,
 				756CDD59DF57208445CE080C /* CreateNotionMeeting_PRD_2026_05_28.md */,
+				5815D183023E9F6D9C52A5BE /* ManualUpload_PRD_2026_05_28.md */,
 			);
 			path = PRD;
 			sourceTree = "<group>";
@@ -875,6 +890,7 @@
 				031A751DE76856F94DF819F3 /* NotionMeetingWriter.swift */,
 				908EE78B9C38578665E6EF12 /* NotionPageBuilder.swift */,
 				9DA782946750D9DEA55107CF /* NotionPagePayload.swift */,
+				B3F63F63325E13C0982EDB1A /* NotionStatus.swift */,
 				EF6FD43A40A3969B3D43637B /* NotionValidation.swift */,
 			);
 			path = Notion;
@@ -1038,6 +1054,7 @@
 				D827E9838278D6B7D573FE2B /* NotionPageBuilder.swift in Sources */,
 				E8FF0493F280995EED5CEAEB /* NotionPagePayload.swift in Sources */,
 				93741B360180366CEB19505E /* NotionSection.swift in Sources */,
+				E394DA09A7BF0B035662D498 /* NotionStatus.swift in Sources */,
 				4BA939BD929D755DDE19ECAB /* NotionValidation.swift in Sources */,
 				D06A67B449C23AD74BE1D7ED /* Organization.swift in Sources */,
 				25E05ED13CBE47E3A5B80AF9 /* OrganizationDetailView.swift in Sources */,
@@ -1075,6 +1092,7 @@
 				FD63F122BB98D1BA40BAF006 /* AudioHijackControllerTests.swift in Sources */,
 				3C5DF3B958DDB8567756A5E1 /* AudioHijackPresenceTests.swift in Sources */,
 				45E617262376BDD3A0983E54 /* AuditLogEntryTests.swift in Sources */,
+				EB424A242D2332DBFDFF5B95 /* AuditLogStoreNotionTests.swift in Sources */,
 				DD7723E8F1336AA9D2F0B58F /* AuditLogStoreTests.swift in Sources */,
 				809AEF38FED38636F76D6CC9 /* ContextCompilerTests.swift in Sources */,
 				7353D863ACF4DC60671B8BFD /* CurrentMeetingEditingIntegrationTests.swift in Sources */,
@@ -1084,6 +1102,7 @@
 				3E3FA38A3339F37D00552E5C /* ErrorInspectorTests.swift in Sources */,
 				D9B84B46ADF628CC1939BECF /* FakeHotkeyRegistrar.swift in Sources */,
 				9B480CA41E55B9EB38EF1E75 /* FakeLoginItemControlling.swift in Sources */,
+				7A38DD8D64F55EFA61CFF1E8 /* FakeNotionMeetingWriter.swift in Sources */,
 				F69CDF53C6F5680FC311A8C9 /* FileOrganizerContextTests.swift in Sources */,
 				2FA13CD051B4628DDED4AE31 /* FileOrganizerIntegrationTests.swift in Sources */,
 				636D5290E254B1E94C7A122D /* FileOrganizerTests.swift in Sources */,
@@ -1113,6 +1132,7 @@
 				F84C6723662ED208D8F42C7F /* PipelineCoordinatorTests.swift in Sources */,
 				F3DDE8F0C48071E18289DEF9 /* PipelineIntegrationTests.swift in Sources */,
 				3CEDB3A932561910FF9BC046 /* ProcessedFilesLedgerTests.swift in Sources */,
+				A6A6FC1FBD4EB59B38D0B73E /* ProcessingPipelineNotionTests.swift in Sources */,
 				D8A3DD38EE0566A4A3279796 /* RecordingURLOpener.swift in Sources */,
 				3FC567457E7EFF9A1383F51E /* RecordingWorkspaceActions.swift in Sources */,
 				7FEBF8449A347B30AB62E554 /* SettingsFeatureSmokeTests.swift in Sources */,

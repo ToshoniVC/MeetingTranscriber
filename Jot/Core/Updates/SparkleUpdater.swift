@@ -15,6 +15,14 @@ protocol UpdateChecking: AnyObject {
     /// this is `false`.
     var canCheckForUpdates: Bool { get }
 
+    /// Display string for the version of a pending update found by the
+    /// background check, or `nil` if Jot is up to date. The sidebar footer
+    /// renders an "Update available: vX.Y" row when this is non-nil.
+    /// Populated by Sparkle's `updater(_:didFindValidUpdate:)` delegate
+    /// call and cleared on `updaterDidNotFindUpdate(_:)`. Always `nil` in
+    /// Debug.
+    var pendingUpdateVersion: String? { get }
+
     /// Show the standard Sparkle "Check for Updates" panel. In Debug this
     /// is a no-op log line so the dev build never tries to replace itself.
     func checkForUpdates()
@@ -31,6 +39,7 @@ protocol UpdateChecking: AnyObject {
 @Observable
 final class SparkleUpdater: UpdateChecking {
     var canCheckForUpdates: Bool { false }
+    var pendingUpdateVersion: String? { nil }
 
     init() {}
 
@@ -57,7 +66,17 @@ final class SparkleUpdater: NSObject, UpdateChecking {
     /// disabled state to it. Observed via KVO inside `init`.
     private(set) var canCheckForUpdates: Bool = false
 
-    private let controller: SPUStandardUpdaterController
+    /// Set when `updater(_:didFindValidUpdate:)` fires on a background
+    /// check, cleared when `updaterDidNotFindUpdate(_:)` fires. Used by
+    /// `MainWindow`'s sidebar footer to surface "Update available: vX.Y"
+    /// without waiting for Sparkle's modal dialog.
+    private(set) var pendingUpdateVersion: String?
+
+    /// IUO because `SPUStandardUpdaterController` wants the delegate at
+    /// construction time, and we can only pass `self` after `super.init()`.
+    /// Set in `init` and never replaced — effectively `let` from any
+    /// caller's perspective.
+    private var controller: SPUStandardUpdaterController!
     /// Held to keep the KVO observation alive for the wrapper's lifetime.
     /// `NSKeyValueObservation` auto-invalidates on dealloc, so we don't
     /// need a `deinit` cleanup — which would be awkward across the
@@ -65,12 +84,14 @@ final class SparkleUpdater: NSObject, UpdateChecking {
     private var canCheckObserver: NSKeyValueObservation?
 
     override init() {
+        super.init()
+        // Now `self` is available — Sparkle holds the delegate weakly, so
+        // a strong-reference cycle is impossible.
         self.controller = SPUStandardUpdaterController(
             startingUpdater: true,
-            updaterDelegate: nil,
+            updaterDelegate: self,
             userDriverDelegate: nil
         )
-        super.init()
         self.canCheckForUpdates = controller.updater.canCheckForUpdates
         // Sparkle's `canCheckForUpdates` flips while a check is in flight.
         // Mirror it onto our @Observable so SwiftUI re-renders the button.
@@ -86,6 +107,27 @@ final class SparkleUpdater: NSObject, UpdateChecking {
 
     func checkForUpdates() {
         controller.checkForUpdates(nil)
+    }
+}
+
+extension SparkleUpdater: SPUUpdaterDelegate {
+    /// Called by Sparkle after a successful appcast check that turned up
+    /// a newer version. Fires for both automatic launch/scheduled checks
+    /// and manual ones triggered by the Settings button. We hop to
+    /// `@MainActor` before mutating our `@Observable` state.
+    nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
+        let version = item.displayVersionString
+        Task { @MainActor [weak self] in
+            self?.pendingUpdateVersion = version
+        }
+    }
+
+    /// Called by Sparkle when a check completes and there's nothing newer
+    /// than the running build. Clears any stale "update available" badge.
+    nonisolated func updaterDidNotFindUpdate(_ updater: SPUUpdater) {
+        Task { @MainActor [weak self] in
+            self?.pendingUpdateVersion = nil
+        }
     }
 }
 

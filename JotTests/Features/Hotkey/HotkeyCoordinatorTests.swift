@@ -6,27 +6,27 @@ import AppKit
 /// Tests for `HotkeyCoordinator` — applies the current hotkey, surfaces
 /// errors, fires the shortcut when triggered.
 ///
-/// Uses `FakeHotkeyRegistrar` + `RecordingProcessRunner` so no global
+/// Uses `FakeHotkeyRegistrar` + `RecordingURLOpener` so no global
 /// Carbon hotkey is registered and no `/usr/bin/shortcuts` is spawned.
 @MainActor
 struct HotkeyCoordinatorTests {
 
     private func makeFixture(
         registrar: FakeHotkeyRegistrar? = nil,
-        runner: RecordingProcessRunner? = nil,
+        opener: RecordingURLOpener? = nil,
         prompter: StubMeetingNamePrompter? = nil,
         audioHijackInstalled: Bool = true
     ) -> (
         coordinator: HotkeyCoordinator,
         settings: AppSettings,
         registrar: FakeHotkeyRegistrar,
-        runner: RecordingProcessRunner,
+        opener: RecordingURLOpener,
         prompter: StubMeetingNamePrompter,
         menuBar: MenuBarController,
         auditLog: AuditLogStore
     ) {
         let registrar = registrar ?? FakeHotkeyRegistrar()
-        let runner = runner ?? RecordingProcessRunner()
+        let opener = opener ?? RecordingURLOpener()
         let prompter = prompter ?? StubMeetingNamePrompter()
         let defaults = EphemeralUserDefaults.make()
         let keychain = InMemoryKeychain()
@@ -45,9 +45,9 @@ struct HotkeyCoordinatorTests {
             }
         )
         // One invoker shared between AudioHijackController and HotkeyCoordinator
-        // — they both spawn `/usr/bin/shortcuts run …`, just with different
-        // names, so the recording runner sees both kinds of calls.
-        let invoker = ShortcutInvoker(runner: runner)
+        // — both ask macOS to open `shortcuts://run-shortcut?…` URLs, just with
+        // different names, so the recording opener captures every URL.
+        let invoker = ShortcutInvoker(opener: opener)
         let audioHijack = AudioHijackController(
             prompter: prompter,
             invoker: invoker,
@@ -62,7 +62,7 @@ struct HotkeyCoordinatorTests {
             menuBar: menuBar,
             auditLog: auditLog
         )
-        return (coordinator, settings, registrar, runner, prompter, menuBar, auditLog)
+        return (coordinator, settings, registrar, opener, prompter, menuBar, auditLog)
     }
 
     // MARK: - Registration
@@ -103,7 +103,7 @@ struct HotkeyCoordinatorTests {
     // MARK: - Trigger → built-in Audio Hijack (default)
 
     @Test
-    func firingHotkey_default_runsBuiltInStartShortcut() async throws {
+    func firingHotkey_default_opensStartShortcutURL() async throws {
         let f = makeFixture()
         f.prompter.nextResponse = "Standup"
         f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
@@ -112,13 +112,14 @@ struct HotkeyCoordinatorTests {
         f.registrar.fireTrigger()
         try await Task.sleep(nanoseconds: 100_000_000)
 
-        // Built-in path: prompt + Start Shortcut via /usr/bin/shortcuts.
+        // Built-in path: prompt + shortcuts://run-shortcut?name=Start&input=…
         #expect(f.prompter.askCount == 1)
-        #expect(f.runner.calls.count == 1)
-        #expect(f.runner.calls[0].arguments[0] == "run")
-        #expect(f.runner.calls[0].arguments[1] == f.settings.startShortcutName)
-        // Meeting name piped via stdin.
-        #expect(f.runner.calls[0].stdin == "Standup")
+        #expect(f.opener.openedURLs.count == 1)
+        let url = f.opener.openedURLs[0]
+        #expect(url.scheme == "shortcuts")
+        #expect(url.host == "run-shortcut")
+        #expect(url.queryValue(named: "name") == f.settings.startShortcutName)
+        #expect(url.queryValue(named: "input") == "Standup")
     }
 
     @Test
@@ -168,11 +169,12 @@ struct HotkeyCoordinatorTests {
         #expect(f.menuBar.recordingMeetingName == nil)
         // Prompter was asked only once (for the start, not the stop).
         #expect(f.prompter.askCount == 1)
-        // Two shortcut calls: start, then stop.
-        #expect(f.runner.calls.count == 2)
-        #expect(f.runner.calls[0].arguments[1] == f.settings.startShortcutName)
-        #expect(f.runner.calls[1].arguments[1] == f.settings.stopShortcutName)
-        #expect(f.runner.calls[1].stdin == nil)   // stop never pipes stdin
+        // Two URLs opened: start, then stop.
+        #expect(f.opener.openedURLs.count == 2)
+        #expect(f.opener.openedURLs[0].queryValue(named: "name") == f.settings.startShortcutName)
+        #expect(f.opener.openedURLs[1].queryValue(named: "name") == f.settings.stopShortcutName)
+        // Stop never sends an input.
+        #expect(f.opener.openedURLs[1].queryValue(named: "input") == nil)
         // Final audit entry is the "stopped" info row.
         #expect(f.auditLog.entries.first?.message.contains("stopped") == true)
     }
@@ -194,10 +196,12 @@ struct HotkeyCoordinatorTests {
     }
 
     @Test
-    func firingHotkey_builtIn_missingShortcut_surfacesActionableError() async throws {
-        let runner = RecordingProcessRunner()
-        runner.nextResult = ProcessResult(exitCode: 1, stdout: "", stderr: "Couldn't find shortcut")
-        let f = makeFixture(runner: runner)
+    func firingHotkey_builtIn_urlOpenFailure_surfacesActionableError() async throws {
+        let opener = RecordingURLOpener()
+        opener.nextError = NSError(domain: "test", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "Shortcuts unavailable"
+        ])
+        let f = makeFixture(opener: opener)
         f.prompter.nextResponse = "X"
         f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
         await f.coordinator.bootstrap()
@@ -234,7 +238,7 @@ struct HotkeyCoordinatorTests {
     // MARK: - Trigger → custom Shortcut (override)
 
     @Test
-    func firingHotkey_customShortcut_runsShortcutsCLI() async throws {
+    func firingHotkey_customShortcut_opensRunShortcutURL() async throws {
         let f = makeFixture()
         f.settings.useBuiltInRecording = false
         f.settings.customShortcutName = "Custom"
@@ -244,16 +248,20 @@ struct HotkeyCoordinatorTests {
         f.registrar.fireTrigger()
         try await Task.sleep(nanoseconds: 100_000_000)
 
-        #expect(f.runner.calls.first?.arguments == ["run", "Custom"])
-        // Custom mode never prompts.
+        #expect(f.opener.openedURLs.count == 1)
+        #expect(f.opener.openedURLs[0].queryValue(named: "name") == "Custom")
+        // Custom mode never prompts and never sends input.
         #expect(f.prompter.askCount == 0)
+        #expect(f.opener.openedURLs[0].queryValue(named: "input") == nil)
     }
 
     @Test
     func firingHotkey_customShortcut_failure_logsFailure() async throws {
-        let runner = RecordingProcessRunner()
-        runner.nextResult = ProcessResult(exitCode: 1, stdout: "", stderr: "not found")
-        let f = makeFixture(runner: runner)
+        let opener = RecordingURLOpener()
+        opener.nextError = NSError(domain: "test", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "Shortcuts unavailable"
+        ])
+        let f = makeFixture(opener: opener)
         f.settings.useBuiltInRecording = false
         f.settings.customShortcutName = "Missing"
         f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
@@ -273,9 +281,9 @@ struct HotkeyCoordinatorTests {
         f.prompter.nextResponse = "T"
         let error = await f.coordinator.testRecordingNow()
         #expect(error == nil)
-        // Built-in test: one Start Shortcut call.
-        #expect(f.runner.calls.count == 1)
-        #expect(f.runner.calls[0].arguments[1] == f.settings.startShortcutName)
+        // Built-in test: one Start Shortcut URL opened.
+        #expect(f.opener.openedURLs.count == 1)
+        #expect(f.opener.openedURLs[0].queryValue(named: "name") == f.settings.startShortcutName)
     }
 
     @Test
@@ -294,17 +302,29 @@ struct HotkeyCoordinatorTests {
         f.settings.customShortcutName = "Manual"
         let error = await f.coordinator.testRecordingNow()
         #expect(error == nil)
-        #expect(f.runner.calls.first?.arguments == ["run", "Manual"])
+        #expect(f.opener.openedURLs.first?.queryValue(named: "name") == "Manual")
     }
 
     @Test
     func testRecordingNow_customShortcut_returnsErrorOnFailure() async {
-        let runner = RecordingProcessRunner()
-        runner.nextResult = ProcessResult(exitCode: 2, stdout: "", stderr: "oops")
-        let f = makeFixture(runner: runner)
+        let opener = RecordingURLOpener()
+        opener.nextError = NSError(domain: "test", code: 1, userInfo: [
+            NSLocalizedDescriptionKey: "oops"
+        ])
+        let f = makeFixture(opener: opener)
         f.settings.useBuiltInRecording = false
         f.settings.customShortcutName = "X"
         let error = await f.coordinator.testRecordingNow()
         #expect(error != nil)
+    }
+}
+
+/// Convenience for assertion readability in this file.
+private extension URL {
+    func queryValue(named name: String) -> String? {
+        URLComponents(url: self, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name == name })?
+            .value
     }
 }

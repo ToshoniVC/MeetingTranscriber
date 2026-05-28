@@ -10,17 +10,30 @@ import SwiftUI
 struct MainWindow: View {
     @State private var selection: MainTab = .transcripts
     @Environment(ErrorInspector.self) private var inspector
+    @Environment(SparkleUpdater.self) private var updater
 
     var body: some View {
         @Bindable var inspectorBinding = inspector
 
         NavigationSplitView {
-            List(MainTab.allCases, selection: $selection) { tab in
-                Label(tab.title, systemImage: tab.systemImage)
-                    .tag(tab)
+            // Sidebar = list of tabs (top) + version footer (bottom).
+            // Wrapping in a VStack lets the footer sit below the List
+            // without pushing the rows around.
+            VStack(spacing: 0) {
+                List(MainTab.allCases, selection: $selection) { tab in
+                    Label(tab.title, systemImage: tab.systemImage)
+                        .tag(tab)
+                }
+                .navigationTitle("Jot")
+
+                Divider()
+
+                SidebarVersionFooter(
+                    pendingUpdate: updater.pendingUpdateVersion,
+                    onUpdateTapped: { updater.checkForUpdates() }
+                )
             }
-            .navigationTitle("Jot")
-            .navigationSplitViewColumnWidth(min: 160, ideal: 200, max: 240)
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 280)
         } detail: {
             switch selection {
             case .transcripts: TranscriptsView()
@@ -41,6 +54,42 @@ struct MainWindow: View {
                 }
             )
         }
+    }
+}
+
+/// Pinned to the bottom of the sidebar. Always shows the running
+/// version; surfaces an "Update available" row when Sparkle's background
+/// check has discovered a newer appcast entry. Clicking the update row
+/// re-triggers `checkForUpdates()` which re-presents Sparkle's standard
+/// dialog so the user can choose Install / Later / Skip.
+private struct SidebarVersionFooter: View {
+    /// `nil` when Jot is up to date or the check hasn't run yet.
+    let pendingUpdate: String?
+    let onUpdateTapped: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Jot v\(AppVersion.marketing)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help("Build \(AppVersion.build)")
+
+            if let version = pendingUpdate {
+                Button(action: onUpdateTapped) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.down.circle.fill")
+                        Text("Update available: v\(version)")
+                    }
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.tint)
+                }
+                .buttonStyle(.plain)
+                .help("Click to open the updater")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 }
 

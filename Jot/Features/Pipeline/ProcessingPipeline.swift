@@ -42,6 +42,23 @@ enum NotionPipelineMode: Sendable {
     case attempt(config: NotionConfig, writer: any NotionMeetingWriter)
 }
 
+/// How the pipeline should treat the post-Notion Claude Code routine
+/// trigger. Snapshotted at pipeline-start time alongside
+/// `NotionPipelineMode` so settings churn doesn't affect in-flight
+/// meetings — the coordinator restarts on any change.
+enum ClaudeCodePipelineMode: Sendable {
+    /// User opted out (toggle off) or config didn't pass validation.
+    /// The success audit entry is stamped with
+    /// `claudeCodeStatus = .skipped(reason)` and no network call
+    /// happens. PRD §4.3 + §6.
+    case skip(reason: ClaudeCodeRoutineStatus.SkipReason)
+
+    /// Wire the routine firing client. After Notion succeeds, the
+    /// pipeline fires the routine and updates `claudeCodeStatus` in
+    /// place via `onClaudeCodeStatusChange`.
+    case attempt(config: ClaudeCodeRoutineConfig, firing: any ClaudeCodeRoutineFiring)
+}
+
 /// Orchestrates the watch → transcribe → organize flow.
 ///
 /// Runs as an `actor` so its mutable state (current file, queue) is
@@ -84,6 +101,17 @@ actor ProcessingPipeline {
     /// `notionStatus` in the store. Ignored when `notionMode == nil`.
     private let onNotionStatusChange: (@Sendable (UUID, NotionStatus) -> Void)?
 
+    /// How to handle the post-Notion Claude Code routine trigger. Nil
+    /// means the pipeline isn't Claude-Code-aware at all (test harnesses
+    /// default); in that case `claudeCodeStatus` on entries stays nil.
+    private let claudeCodeMode: ClaudeCodePipelineMode?
+
+    /// Called when an in-flight Claude Code fire resolves —
+    /// `(entryId, finalStatus)`. Hosts update the corresponding audit
+    /// entry's `claudeCodeStatus` in the store. Ignored when
+    /// `claudeCodeMode == nil`.
+    private let onClaudeCodeStatusChange: (@Sendable (UUID, ClaudeCodeRoutineStatus) -> Void)?
+
     private var running = false
     private var consumerTask: Task<Void, Never>?
 
@@ -101,7 +129,9 @@ actor ProcessingPipeline {
         onAuditEntry: @escaping @Sendable (AuditLogEntry) -> Void,
         consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)? = nil,
         notionMode: NotionPipelineMode? = nil,
-        onNotionStatusChange: (@Sendable (UUID, NotionStatus) -> Void)? = nil
+        onNotionStatusChange: (@Sendable (UUID, NotionStatus) -> Void)? = nil,
+        claudeCodeMode: ClaudeCodePipelineMode? = nil,
+        onClaudeCodeStatusChange: (@Sendable (UUID, ClaudeCodeRoutineStatus) -> Void)? = nil
     ) {
         self.config = config
         self.watcher = watcher
@@ -112,6 +142,8 @@ actor ProcessingPipeline {
         self.consumeMeetingContext = consumeMeetingContext
         self.notionMode = notionMode
         self.onNotionStatusChange = onNotionStatusChange
+        self.claudeCodeMode = claudeCodeMode
+        self.onClaudeCodeStatusChange = onClaudeCodeStatusChange
     }
 
     // MARK: - Lifecycle
@@ -221,10 +253,13 @@ actor ProcessingPipeline {
             // initial `notionStatus` on the entry — either `.pending`
             // (we're about to attempt the write) or `.skipped(reason)`.
             // The `.pending` row gets updated in place when the async
-            // task in step 5 resolves.
+            // task in step 5 resolves. Same shape for Claude Code:
+            // either `.skipped(...)` or nil (pending — will be filled
+            // in by the post-Notion routine fire).
             let ms = Int(Date().timeIntervalSince(startTime) * 1000)
             let entryId = UUID()
             let initialStatus = initialNotionStatus()
+            let initialClaudeCodeStatus = initialClaudeCodeStatus()
             onAuditEntry(.init(
                 id: entryId,
                 kind: .success,
@@ -234,7 +269,8 @@ actor ProcessingPipeline {
                 retryable: false,
                 contextAttached: prompt != nil,
                 organizationName: snapshot?.organizationName,
-                notionStatus: initialStatus
+                notionStatus: initialStatus,
+                claudeCodeStatus: initialClaudeCodeStatus
             ))
             onStateChange(.idle)
 
@@ -421,10 +457,37 @@ actor ProcessingPipeline {
         }
     }
 
+    /// Initial `claudeCodeStatus` for the success entry. Skip cases are
+    /// known up-front; the attempt path leaves the field nil at the
+    /// success-entry write moment and the post-Notion task fills in
+    /// `.fired` / `.failed` later. Returns nil entirely when the
+    /// pipeline isn't Claude-Code-aware.
+    private func initialClaudeCodeStatus() -> ClaudeCodeRoutineStatus? {
+        switch claudeCodeMode {
+        case .none:
+            return nil
+        case .skip(let reason):
+            return .skipped(reason: reason)
+        case .attempt:
+            // The post-Notion task will surface the real outcome via
+            // `onClaudeCodeStatusChange`. We leave the field nil here
+            // rather than introducing a `.pending` state — the audit
+            // row reads "Notes: …" only once the routine fires.
+            return nil
+        }
+    }
+
     /// Kick off the Notion write in the background. When it completes
     /// (success, typed error, or transport error), surface the outcome
     /// via `onNotionStatusChange` so the audit row is updated in place.
     /// Cancellation during `stop()` is silent by design.
+    ///
+    /// On Notion success, if `claudeCodeMode == .attempt(...)`, also
+    /// fires the Claude Code routine and surfaces its outcome via
+    /// `onClaudeCodeStatusChange`. PRD §4.3 requires this strict order:
+    /// transcript → Notion → routine fire. Notion failure short-circuits
+    /// the routine with a `.skipped(reason: .notionNotReady)` so the
+    /// audit row honestly reflects why no notes were generated.
     private func scheduleNotionWrite(
         entryId: UUID,
         config notionConfig: NotionConfig,
@@ -435,6 +498,7 @@ actor ProcessingPipeline {
     ) {
         let task = Task { [weak self] in
             let outcome: NotionStatus
+            var pageURL: URL?
             do {
                 let result = try await writer.createMeetingPage(
                     config: notionConfig,
@@ -443,6 +507,7 @@ actor ProcessingPipeline {
                     additionalContext: additionalContext
                 )
                 outcome = .succeeded(pageURL: result.url)
+                pageURL = result.url
                 Log.notion.info("Notion page created → \(result.url.absoluteString, privacy: .public)")
             } catch is CancellationError {
                 return
@@ -455,9 +520,94 @@ actor ProcessingPipeline {
             }
             // Hand the outcome back to the host and drop our task handle.
             self?.onNotionStatusChange?(entryId, outcome)
+
+            // Post-Notion: fire the Claude Code routine when configured,
+            // but only when the Notion write actually succeeded — the
+            // routine has nothing to write into otherwise.
+            await self?.fireClaudeCodeRoutineIfReady(
+                entryId: entryId,
+                notionPageURL: pageURL,
+                meetingName: meetingName
+            )
+
             await self?.clearNotionTask(entryId)
         }
         notionTasks[entryId] = task
+    }
+
+    /// Fire the configured Claude Code routine after a Notion write,
+    /// honoring the strict order from PRD §4.3:
+    ///   1. transcript success
+    ///   2. notion page success (signaled by `notionPageURL != nil`)
+    ///   3. routine fire
+    ///
+    /// Failure of the fire call must not regress earlier outcomes —
+    /// the Notion success status has already been reported by the
+    /// caller. We surface the routine outcome via
+    /// `onClaudeCodeStatusChange` so the audit row's Notes annotation
+    /// can be updated in place.
+    private func fireClaudeCodeRoutineIfReady(
+        entryId: UUID,
+        notionPageURL: URL?,
+        meetingName: String
+    ) async {
+        guard case .attempt(let routineConfig, let firing) = claudeCodeMode else {
+            // .none / .skip — the success entry already carries the
+            // right initial status; no extra work here.
+            return
+        }
+        guard let notionPageURL else {
+            // Notion failed (no page URL). Tell the audit row the
+            // routine was skipped, with the specific reason, so the
+            // user sees why the notes never appeared.
+            onClaudeCodeStatusChange?(entryId, .skipped(reason: .notionNotReady))
+            Log.claudeCode.info("Routine fire skipped — Notion did not produce a page.")
+            return
+        }
+
+        // Body composition: user-configured extra text plus a footer
+        // line referencing the freshly-created Notion page so the
+        // routine knows which page to write into (PRD §5).
+        let text = composeRoutineText(
+            extraText: routineConfig.extraText,
+            notionPageURL: notionPageURL,
+            meetingName: meetingName
+        )
+
+        do {
+            try await firing.fire(config: routineConfig, text: text)
+            onClaudeCodeStatusChange?(entryId, .fired)
+            Log.claudeCode.info("Claude Code routine fired for meeting → \(notionPageURL.absoluteString, privacy: .public)")
+        } catch is CancellationError {
+            return
+        } catch let error as ClaudeCodeRoutineError {
+            onClaudeCodeStatusChange?(entryId, .failed(message: error.userFacingMessage))
+            Log.claudeCode.error("Claude Code fire failed: \(error.userFacingMessage, privacy: .public)")
+        } catch {
+            onClaudeCodeStatusChange?(entryId, .failed(message: error.localizedDescription))
+            Log.claudeCode.error("Claude Code fire failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Compose the request body's `text` field. The user's extra text is
+    /// preserved verbatim (they may have intentional formatting); a
+    /// footer line tells the routine which Notion page to act on. The
+    /// PRD (§5) explicitly allows including the page identifier in
+    /// `text` as the handoff mechanism.
+    private func composeRoutineText(
+        extraText: String,
+        notionPageURL: URL,
+        meetingName: String
+    ) -> String {
+        let trimmedExtra = extraText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let footer = """
+        Notion meeting page: \(notionPageURL.absoluteString)
+        Meeting name: \(meetingName)
+        """
+        if trimmedExtra.isEmpty {
+            return footer
+        }
+        return "\(extraText)\n\n\(footer)"
     }
 
     /// Internal helper for `scheduleNotionWrite`'s completion path — runs

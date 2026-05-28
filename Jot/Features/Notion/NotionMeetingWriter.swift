@@ -44,4 +44,16 @@ struct NotionDatabaseInfo: Equatable, Sendable {
     /// create-page calls. Notion guarantees exactly one title property
     /// per database; we surface its display name (e.g., "Name").
     let titlePropertyName: String
+
+    /// Name of the first `date`-typed property in the database, if any.
+    /// Used to stamp the meeting page with today's date so the database
+    /// view sorts chronologically out of the box. Optional: databases
+    /// without a date property simply skip the date stamp.
+    let datePropertyName: String?
+
+    init(title: String, titlePropertyName: String, datePropertyName: String? = nil) {
+        self.title = title
+        self.titlePropertyName = titlePropertyName
+        self.datePropertyName = datePropertyName
+    }
 }

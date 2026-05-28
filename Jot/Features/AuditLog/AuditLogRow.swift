@@ -48,6 +48,7 @@ struct AuditLogRow: View {
                     }
 
                     notionDescription
+                    claudeCodeDescription
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -115,6 +116,36 @@ struct AuditLogRow: View {
             .font(.caption)
         case .failed(let message):
             Label("Notion: failed", systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.red)
+                .font(.caption)
+                .help(message)
+        }
+    }
+
+    /// Compact "Notes: …" suffix for success rows. The disabled-skip
+    /// case intentionally renders nothing so the default-user UX isn't
+    /// nagged for choosing not to use Claude Code. PRD §4.2 mandates a
+    /// visible "fired" indicator in the test checklist, so success
+    /// renders as a bolded `Notes: fired` label.
+    @ViewBuilder
+    private var claudeCodeDescription: some View {
+        switch entry.claudeCodeStatus {
+        case .none, .skipped(.disabled):
+            EmptyView()
+        case .skipped(.misconfigured):
+            Text("• Notes: setup needed")
+                .foregroundStyle(.orange)
+                .font(.caption)
+        case .skipped(.notionNotReady):
+            // The Notion failure annotation already explains *why*;
+            // adding "Notes: skipped" here would be redundant noise.
+            EmptyView()
+        case .fired:
+            Text("• Notes: fired")
+                .foregroundStyle(.blue)
+                .font(.caption)
+        case .failed(let message):
+            Label("Notes: failed", systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.red)
                 .font(.caption)
                 .help(message)

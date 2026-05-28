@@ -87,6 +87,93 @@ struct NotionPageBuilderTests {
         #expect(runs.first?.text.content == "Q3 Planning")
     }
 
+    // MARK: - Date property
+
+    @Test
+    func build_omitsDateProperty_whenDatePropertyNameIsNil() {
+        let result = NotionPageBuilder.build(
+            databaseId: dbId,
+            titlePropertyName: titleProp,
+            datePropertyName: nil,
+            meetingDate: Date(),
+            meetingName: "x",
+            transcript: "",
+            additionalContext: ""
+        )
+        // Only the title property — no date entry.
+        #expect(result.createPage.properties.count == 1)
+        #expect(result.createPage.properties[titleProp] != nil)
+    }
+
+    @Test
+    func build_omitsDateProperty_whenMeetingDateIsNil() {
+        let result = NotionPageBuilder.build(
+            databaseId: dbId,
+            titlePropertyName: titleProp,
+            datePropertyName: "Date",
+            meetingDate: nil,
+            meetingName: "x",
+            transcript: "",
+            additionalContext: ""
+        )
+        #expect(result.createPage.properties.count == 1)
+        #expect(result.createPage.properties["Date"] == nil)
+    }
+
+    @Test
+    func build_stampsDateProperty_inLocalYYYYMMDD_whenBothProvided() {
+        // Pick a date we can format deterministically. Use POSIX in
+        // local TZ — same formatter the builder uses internally.
+        let date = Date(timeIntervalSince1970: 1_716_854_400) // 2024-05-27 UTC noon
+        let expected = NotionPageBuilder.isoDateString(from: date)
+
+        let result = NotionPageBuilder.build(
+            databaseId: dbId,
+            titlePropertyName: titleProp,
+            datePropertyName: "Date",
+            meetingDate: date,
+            meetingName: "x",
+            transcript: "",
+            additionalContext: ""
+        )
+        guard case .date(let iso) = result.createPage.properties["Date"] else {
+            Issue.record("Date property not set under 'Date' key")
+            return
+        }
+        #expect(iso == expected)
+    }
+
+    @Test
+    func build_datePropertyEncodesAsNotionDateShape() throws {
+        let date = Date(timeIntervalSince1970: 1_716_854_400)
+        let expected = NotionPageBuilder.isoDateString(from: date)
+        let result = NotionPageBuilder.build(
+            databaseId: dbId,
+            titlePropertyName: titleProp,
+            datePropertyName: "Date",
+            meetingDate: date,
+            meetingName: "x",
+            transcript: "",
+            additionalContext: ""
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(result.createPage)
+        let json = try #require(String(data: data, encoding: .utf8))
+        // Notion expects {"Date": {"date": {"start": "YYYY-MM-DD"}}}.
+        #expect(json.contains("\"Date\":{\"date\":{\"start\":\"\(expected)\"}}"))
+    }
+
+    @Test
+    func isoDateString_isLocalYYYYMMDD() {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        let now = Date()
+        #expect(NotionPageBuilder.isoDateString(from: now) == formatter.string(from: now))
+    }
+
     @Test
     func build_setsDatabaseIdOnParent() {
         let result = NotionPageBuilder.build(

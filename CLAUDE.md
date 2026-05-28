@@ -7,7 +7,7 @@ Auto-loaded by Claude Code at session start. The full standing instructions live
 
 ## Active spec & plan
 
-- **Active PRD:** [`PRD/CreateNotionMeeting_PRD_2026_05_28.md`](PRD/CreateNotionMeeting_PRD_2026_05_28.md) — feature spec for the Notion meeting-creation bridge currently in flight.
+- **Active PRD:** [`PRD/CreateClaudeCodeMeetingNotes_PRD_2026_05_28.md`](PRD/CreateClaudeCodeMeetingNotes_PRD_2026_05_28.md) — feature spec for the optional Claude Code routine trigger that generates meeting notes inside the Notion page after Jot finishes processing.
 - **Active implementation plan:** [`Claude/implementation-plan.md`](Claude/implementation-plan.md) — phased build plan for the active PRD.
 - **Backlog:** [`PRD/Backlog.md`](PRD/Backlog.md).
 
@@ -19,3 +19,5 @@ Foundation specs and shipped-milestone plans. Useful for historical context, not
 - [`Claude/archive/implementation-plan_v2026_05_27.md`](Claude/archive/implementation-plan_v2026_05_27.md) — original phased build plan for that PRD (Phases 0–9, M1–M4).
 - [`PRD/archive/AddContext_PRD_2026_05_28.md`](PRD/archive/AddContext_PRD_2026_05_28.md) — Add Context PRD (organization profiles + per-meeting context + compiled Whisper prompt + `context.md` artifact). Shipped in v0.2.x.
 - [`Claude/archive/implementation-plan_addContext_v2026_05_28.md`](Claude/archive/implementation-plan_addContext_v2026_05_28.md) — phased build plan for the Add Context PRD (Phases A–H).
+- [`PRD/archive/CreateNotionMeeting_PRD_2026_05_28.md`](PRD/archive/CreateNotionMeeting_PRD_2026_05_28.md) — Notion meeting-creation bridge PRD (creates a new page in a configured Notion database with transcript + context toggles). Shipped in v0.3.0.
+- [`Claude/archive/implementation-plan_createNotionMeeting_v2026_05_28.md`](Claude/archive/implementation-plan_createNotionMeeting_v2026_05_28.md) — phased build plan for the Notion meeting-creation PRD (Phases A–F).

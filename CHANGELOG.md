@@ -5,6 +5,42 @@ Versions are tagged from `main` (`v0.1.0`, `v0.1.1`, …) and built/signed by
 release notes from the `<description>` element in `docs/appcast.xml`, not
 this file — this is the long-form humans-only log.
 
+## v0.4.0 — Claude Code meeting notes + date-stamped Notion pages
+
+Optional post-Notion routine trigger that asks a Claude Code routine to
+fill in the empty Meeting Notes toggle, plus a small Notion improvement
+that stamps today's date onto every created page.
+
+- **New Settings → Claude Code section.** Master toggle, routine fire
+  endpoint URL, bearer token (Keychain-backed, separate account from
+  the transcription and Notion tokens), optional extra instruction text
+  appended as the routine body's `text`, plus an in-app setup guide and
+  test checklist. Validation distinguishes disabled / setup needed /
+  ready and reminds the user that Notion must also be configured.
+- **Strict trigger order** (PRD §4.3): transcript → Notion page →
+  routine fire. The routine is only fired when the Notion write
+  actually succeeded; a Notion failure short-circuits with
+  `Notes: skipped (notionNotReady)` on the audit row so the user knows
+  why no notes were generated.
+- **Single-retry fire client.** `URLSession`-backed
+  `ClaudeCodeRoutineClient` sends the PRD §4.4 contract verbatim
+  (`Authorization: Bearer …`, `anthropic-version: 2023-06-01`,
+  `anthropic-beta: experimental-cc-routine-2026-04-01`,
+  `Content-Type: application/json`, body `{"text": "…"}`). Transport
+  errors retry once; status-coded errors surface immediately and never
+  affect the rest of the pipeline.
+- **Audit log shows the outcome.** Success rows render
+  `Notes: fired` in blue; failures render a red triangle with the error
+  message in a tooltip. Disabled / no-Notion-page cases stay silent so
+  default-user UX isn't nagged.
+- **Notion pages get today's date.** When the configured Notion
+  database has a `date`-typed property, Jot now stamps it with today's
+  date (`YYYY-MM-DD`, user-local time zone) on page creation. Databases
+  without a date column behave exactly as before.
+- **Schema bump.** `AuditLogEntry` schemaVersion 3 → 4 (adds
+  `claudeCodeStatus`). v1–v3 entries on disk decode cleanly with
+  `claudeCodeStatus = nil`.
+
 ## v0.3.0 — Notion meeting creation
 
 Optional delivery bridge that creates a new page in a configured Notion

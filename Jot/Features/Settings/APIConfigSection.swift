@@ -128,13 +128,17 @@ struct APIConfigSection: View {
             defer { isTesting = false }
             do {
                 let client = TranscriptionClient()
-                let transcript = try await client.transcribe(
+                let result = try await client.transcribe(
                     audio: audioURL,
                     baseURL: baseURL,
                     model: model,
                     apiKey: apiKey
                 )
-                let cleaned = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                // The Test-connection panel shows what the user would
+                // see in the Notion page — the timestamped rendering
+                // when segments are available, plain text otherwise.
+                let body = TimestampedTranscriptFormatter.formatBody(for: result)
+                let cleaned = body.trimmingCharacters(in: .whitespacesAndNewlines)
                 testFeedback = .success(transcript: cleaned, sourceFilename: audioURL.lastPathComponent)
             } catch let error as TranscriptionError {
                 testFeedback = .failure(message: error.userFacingMessage)

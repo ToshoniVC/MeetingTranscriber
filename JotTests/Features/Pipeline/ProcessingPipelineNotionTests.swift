@@ -165,7 +165,10 @@ struct ProcessingPipelineNotionTests {
         // Writer was called with the right inputs.
         #expect(writer.calls.count == 1)
         let call = try #require(writer.calls.first)
-        #expect(call.transcript == "transcribed body")
+        // v0.4.4: Notion gets the timestamped rendering. Our mock
+        // produces a single segment 0–1s carrying the body text, which
+        // renders as `[00:00:00] transcribed body`.
+        #expect(call.transcript == "[00:00:00] transcribed body")
         #expect(call.config.databaseId == Self.notionConfig.databaseId)
         // No snapshot was wired, so meetingName falls back to audio basename
         // and additionalContext is empty (PRD §4.3 — empty Additional Context

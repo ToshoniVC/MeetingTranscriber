@@ -60,7 +60,7 @@ struct TranscriptionClientIntegrationTests {
     // MARK: - Happy path
 
     @Test
-    func successfulRequest_returnsTrimmedText() async throws {
+    func successfulRequest_returnsTrimmedTextAndPreservesRawJSON() async throws {
         MockURLProtocol.reset()
         defer { MockURLProtocol.reset() }
         MockURLProtocol.responder = { _ in Self.okResponse(body: "hello world\n") }
@@ -69,13 +69,18 @@ struct TranscriptionClientIntegrationTests {
         defer { try? FileManager.default.removeItem(at: audio) }
 
         let client = TranscriptionClient(session: MockURLSession.make())
-        let text = try await client.transcribe(
+        let result = try await client.transcribe(
             audio: audio,
             baseURL: Self.baseURL,
             model: "whisper-large-v3",
             apiKey: "sk-test"
         )
-        #expect(text == "hello world")
+        #expect(result.text == "hello world")
+        // The raw response bytes survive end-to-end so FileOrganizer can
+        // persist them verbatim on disk.
+        #expect(!result.rawJSON.isEmpty)
+        let echoed = String(data: result.rawJSON, encoding: .utf8) ?? ""
+        #expect(echoed.contains("\"text\""), "rawJSON should be the verbatim server body")
     }
 
     @Test
@@ -121,13 +126,15 @@ struct TranscriptionClientIntegrationTests {
         defer { try? FileManager.default.removeItem(at: audio) }
 
         let client = TranscriptionClient(session: MockURLSession.make())
-        let text = try await client.transcribe(
+        let result = try await client.transcribe(
             audio: audio,
             baseURL: Self.baseURL,
             model: "whisper-1",
             apiKey: "sk-test"
         )
-        #expect(text == "partial meeting transcript")
+        #expect(result.text == "partial meeting transcript")
+        #expect(result.duration == 900)
+        #expect(result.segments.last?.end == 120)
     }
 
     @Test
@@ -251,11 +258,11 @@ struct TranscriptionClientIntegrationTests {
         defer { try? FileManager.default.removeItem(at: audio) }
 
         let client = TranscriptionClient(session: MockURLSession.make())
-        let text = try await client.transcribe(
+        let result = try await client.transcribe(
             audio: audio, baseURL: Self.baseURL,
             model: "m", apiKey: "sk"
         )
-        #expect(text == "second time worked")
+        #expect(result.text == "second time worked")
         #expect(MockURLProtocol.requests.count == 2)
     }
 

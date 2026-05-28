@@ -174,7 +174,9 @@ struct NotionEndToEndIntegrationTests {
         #expect(writer.calls.count == 1)
         let call = try #require(writer.calls.first)
         #expect(call.meetingName == "Standup")
-        #expect(call.transcript == "the standup transcript")
+        // v0.4.4: Notion receives the timestamped rendering. The mock's
+        // single 0–1s segment renders as `[00:00:00] the standup transcript`.
+        #expect(call.transcript == "[00:00:00] the standup transcript")
         #expect(call.additionalContext.contains("Organization: Acme"))
         #expect(call.additionalContext.contains("MRR = Monthly Recurring Revenue"))
         #expect(call.config.databaseId == Self.notionConfig.databaseId)

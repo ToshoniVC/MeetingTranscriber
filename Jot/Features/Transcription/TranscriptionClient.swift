@@ -120,14 +120,39 @@ actor TranscriptionClient {
             throw typed
         }
 
-        guard let text = String(data: data, encoding: .utf8) else {
+        let decoded: VerboseTranscriptionResponse
+        do {
+            decoded = try JSONDecoder().decode(VerboseTranscriptionResponse.self, from: data)
+        } catch {
             throw TranscriptionError.malformedResponse
         }
 
-        // The server returns plain text per `response_format=text`. Trim a
-        // trailing newline some endpoints add so downstream consumers don't
-        // have to.
-        return text.trimmingCharacters(in: CharacterSet.newlines)
+        // Diagnostic: when Whisper truncates a long meeting it reports the
+        // full audio duration but the last segment's `end` falls well short
+        // of it. Log both so the gap shows up in Console.app on every run —
+        // no code change needed to debug a short transcript next time.
+        let duration = decoded.duration ?? -1
+        let lastEnd = decoded.segments?.last?.end ?? -1
+        let gap = (duration >= 0 && lastEnd >= 0) ? duration - lastEnd : -1
+        Log.transcription.info("Transcribed: duration=\(duration, privacy: .public)s lastSegmentEnd=\(lastEnd, privacy: .public)s gap=\(gap, privacy: .public)s textChars=\(decoded.text.count, privacy: .public)")
+
+        return decoded.text.trimmingCharacters(in: CharacterSet.newlines)
+    }
+
+    // MARK: - Decoding
+
+    /// Subset of the `verbose_json` response we care about. The full payload
+    /// has more fields (`task`, `language`, per-segment metadata like
+    /// `tokens`, `avg_logprob`, etc.); we keep the model narrow so a future
+    /// server-side addition doesn't break decoding.
+    private struct VerboseTranscriptionResponse: Decodable {
+        let text: String
+        let duration: Double?
+        let segments: [Segment]?
+
+        struct Segment: Decodable {
+            let end: Double?
+        }
     }
 
     private func map(urlError: URLError) -> TranscriptionError {

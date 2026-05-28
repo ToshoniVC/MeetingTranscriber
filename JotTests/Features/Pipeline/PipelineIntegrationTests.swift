@@ -42,9 +42,22 @@ struct PipelineIntegrationTests {
         return entries.first { $0.hasSuffix(suffix) }
     }
 
-    private static func okResponse(body: String) -> (HTTPURLResponse, Data) {
-        let r = HTTPURLResponse(url: baseURL, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
-        return (r, Data(body.utf8))
+    /// Wrap `body` as a `verbose_json` transcription response — the format
+    /// `TranscriptionClient` decodes since v0.4.2. Pipeline-level
+    /// integration tests don't care about the diagnostic fields; they only
+    /// need the `text` to round-trip.
+    private static func okResponse(body text: String) -> (HTTPURLResponse, Data) {
+        let r = HTTPURLResponse(url: baseURL, statusCode: 200, httpVersion: "HTTP/1.1",
+                                headerFields: ["Content-Type": "application/json"])!
+        let payload: [String: Any] = [
+            "task": "transcribe",
+            "language": "english",
+            "duration": 1.0,
+            "text": text,
+            "segments": [["id": 0, "start": 0.0, "end": 1.0, "text": text]]
+        ]
+        let body = try! JSONSerialization.data(withJSONObject: payload, options: [])
+        return (r, body)
     }
 
     private static func errorResponse(status: Int) -> (HTTPURLResponse, Data) {

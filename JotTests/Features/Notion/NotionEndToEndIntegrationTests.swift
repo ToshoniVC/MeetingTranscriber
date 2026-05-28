@@ -17,6 +17,19 @@ struct NotionEndToEndIntegrationTests {
         databaseId: "1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d"
     )
 
+    /// verbose_json transcription stub — `TranscriptionClient` decodes
+    /// JSON since v0.4.2, so the e2e mock has to look like the real API.
+    private static func transcriptionResponse(_ text: String) -> (HTTPURLResponse, Data) {
+        let r = HTTPURLResponse(url: baseURL, statusCode: 200, httpVersion: "HTTP/1.1",
+                                headerFields: ["Content-Type": "application/json"])!
+        let payload: [String: Any] = [
+            "task": "transcribe", "language": "english", "duration": 1.0,
+            "text": text,
+            "segments": [["id": 0, "start": 0.0, "end": 1.0, "text": text]]
+        ]
+        return (r, try! JSONSerialization.data(withJSONObject: payload, options: []))
+    }
+
     private static func makeFolders() throws -> (watch: URL, output: URL, ledger: ProcessedFilesLedger) {
         let watch = FileManager.default.temporaryDirectory
             .appendingPathComponent("jot-nx-watch-\(UUID().uuidString)")
@@ -58,10 +71,7 @@ struct NotionEndToEndIntegrationTests {
     func happyPath_recordedMeetingWithOrgAndNotion_endsWithSucceededRow() async throws {
         MockURLProtocol.reset()
         defer { MockURLProtocol.reset() }
-        MockURLProtocol.responder = { _ in
-            let r = HTTPURLResponse(url: Self.baseURL, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
-            return (r, Data("the standup transcript".utf8))
-        }
+        MockURLProtocol.responder = { _ in Self.transcriptionResponse("the standup transcript") }
 
         let (watch, output, ledger) = try Self.makeFolders()
         defer {
@@ -196,10 +206,7 @@ struct NotionEndToEndIntegrationTests {
     func legacyDisabledFlow_dropsFile_makesNoNotionCalls() async throws {
         MockURLProtocol.reset()
         defer { MockURLProtocol.reset() }
-        MockURLProtocol.responder = { _ in
-            let r = HTTPURLResponse(url: Self.baseURL, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
-            return (r, Data("plain transcript".utf8))
-        }
+        MockURLProtocol.responder = { _ in Self.transcriptionResponse("plain transcript") }
 
         let (watch, output, ledger) = try Self.makeFolders()
         defer {
@@ -264,10 +271,7 @@ struct NotionEndToEndIntegrationTests {
     func notionFailure_doesNotAffectTranscriptOrContextOutput() async throws {
         MockURLProtocol.reset()
         defer { MockURLProtocol.reset() }
-        MockURLProtocol.responder = { _ in
-            let r = HTTPURLResponse(url: Self.baseURL, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
-            return (r, Data("transcript body".utf8))
-        }
+        MockURLProtocol.responder = { _ in Self.transcriptionResponse("transcript body") }
 
         let (watch, output, ledger) = try Self.makeFolders()
         defer {

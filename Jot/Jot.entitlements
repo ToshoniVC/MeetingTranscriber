@@ -44,18 +44,19 @@
         Sparkle 2.x sandboxing (Phase 9 follow-up).
 
         With App Sandbox enabled and SUEnableInstallerLauncherService=YES,
-        Sparkle's Installer.xpc publishes two mach services that the main
-        Jot process needs to look up to receive status + progress callbacks
-        from the install:
+        Sparkle's update helpers publish three mach services that the main
+        Jot process needs to look up:
 
-          $(PRODUCT_BUNDLE_IDENTIFIER)-spks   (Status)
-          $(PRODUCT_BUNDLE_IDENTIFIER)-spkp   (Progress)
+          $(PRODUCT_BUNDLE_IDENTIFIER)-spks   (Status — Updater → Jot)
+          $(PRODUCT_BUNDLE_IDENTIFIER)-spki   (Installer Interaction — Jot → Autoupdate; sends "begin install")
+          $(PRODUCT_BUNDLE_IDENTIFIER)-spkp   (Progress — Autoupdate → Jot; periodic download/install %)
 
-        Without the entries below the sandbox blocks both lookups; the
-        installer eventually times out with "installation data was never
-        received" and the user sees the generic
-        "An error occurred while running the updater" message in the
-        Sparkle dialog. Confirmed via Console.app during a v0.1.0 → v0.1.1
+        v0.1.2 shipped with only -spks and -spkp. Without -spki, Jot's
+        connection to Autoupdate's install-command channel failed silently
+        (sandbox blocked the mach lookup), Autoupdate waited indefinitely
+        for the "go" signal, Jot timed out the status connection ~4 s in,
+        and the Sparkle dialog surfaced "An error occurred while running
+        the updater". Confirmed via Console.app during a v0.1.2 → v0.1.3
         attempt.
 
         Reference: https://sparkle-project.org/documentation/sandboxing/
@@ -63,6 +64,7 @@
     <key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
     <array>
         <string>$(PRODUCT_BUNDLE_IDENTIFIER)-spks</string>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER)-spki</string>
         <string>$(PRODUCT_BUNDLE_IDENTIFIER)-spkp</string>
     </array>
 </dict>

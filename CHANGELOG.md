@@ -5,6 +5,17 @@ Versions are tagged from `main` (`v0.1.0`, `v0.1.1`, …) and built/signed by
 release notes from the `<description>` element in `docs/appcast.xml`, not
 this file — this is the long-form humans-only log.
 
+## v0.1.7 — Bootstrap at process launch
+
+Fixes the menu-bar icon sitting at "Not yet configured" after Login-Item
+autostart until the user manually opened the main window.
+
+Cause: `pipeline.bootstrap()` and `hotkey.bootstrap()` were called from a
+`.task` modifier on `MainWindow`. Because `LSUIElement = YES`, the window
+isn't shown at launch, so the modifier never fired. Moved both calls
+(plus the `launchOnStartup` reapply) into `JotApp.init()` so they run
+unconditionally at process launch.
+
 ## v0.1.6 — App icon
 
 First real Dock/Launchpad icon. Replaces the empty `AppIcon.appiconset`

@@ -66,6 +66,19 @@ struct JotApp: App {
         self._errorInspector = State(initialValue: errorInspector)
         self._debugMode = State(initialValue: debugMode)
         self._updater = State(initialValue: updater)
+
+        // Bootstrap at process launch, not at MainWindow appearance.
+        // LSUIElement = YES means launching as a Login Item never opens the
+        // main window, so a `.task` on the window's content would never fire
+        // and the menu-bar icon would sit at .notConfigured until the user
+        // manually opened the window.
+        Task { @MainActor in
+            await pipeline.bootstrap()
+            await hotkey.bootstrap()
+            if settings.launchOnStartup {
+                loginItem.apply(enabled: true)
+            }
+        }
     }
 
     var body: some Scene {
@@ -99,17 +112,6 @@ struct JotApp: App {
                 .environment(debugMode)
                 .environment(updater)
                 .frame(minWidth: 760, minHeight: 480)
-                .task {
-                    await pipeline.bootstrap()
-                    await hotkey.bootstrap()
-                    // If the user had Launch on Startup enabled previously,
-                    // reapply on launch so the registration is fresh (a
-                    // freshly-installed binary might have a different code
-                    // signature than the last registration).
-                    if settings.launchOnStartup {
-                        loginItem.apply(enabled: true)
-                    }
-                }
         }
         .windowResizability(.contentMinSize)
     }

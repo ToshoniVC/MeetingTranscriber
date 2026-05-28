@@ -84,7 +84,22 @@ final class AppSettings {
         didSet { defaults.set(launchOnStartup, forKey: Keys.launchOnStartup) }
     }
 
-    // MARK: - Keychain-backed property
+    /// Master toggle for the Notion meeting-creation bridge. When `false`
+    /// (the default) the rest of the Notion config is ignored and no
+    /// network traffic ever flows to Notion.
+    var notionEnabled: Bool {
+        didSet { defaults.set(notionEnabled, forKey: Keys.notionEnabled) }
+    }
+
+    /// Notion database ID where new meeting pages are created. The user
+    /// pastes this from the database URL — a 32-char hex string, optionally
+    /// hyphenated. Stored as raw text; `NotionValidation` decides whether
+    /// it's well-formed enough to attempt a write.
+    var notionDatabaseId: String {
+        didSet { defaults.set(notionDatabaseId, forKey: Keys.notionDatabaseId) }
+    }
+
+    // MARK: - Keychain-backed properties
 
     /// API key for the transcription endpoint. Round-trips through Keychain
     /// (never `UserDefaults`, never disk). Setting `nil` deletes the entry.
@@ -95,6 +110,20 @@ final class AppSettings {
                 try? keychain.setString(newValue, forKey: Self.apiKeyAccount)
             } else {
                 try? keychain.deleteString(forKey: Self.apiKeyAccount)
+            }
+        }
+    }
+
+    /// Notion integration token (a `secret_...` string from a Notion
+    /// internal integration). Round-trips through Keychain alongside
+    /// `apiKey`. Setting `nil` or empty deletes the entry.
+    var notionToken: String? {
+        get { keychain.getString(forKey: Self.notionTokenAccount) }
+        set {
+            if let newValue, !newValue.isEmpty {
+                try? keychain.setString(newValue, forKey: Self.notionTokenAccount)
+            } else {
+                try? keychain.deleteString(forKey: Self.notionTokenAccount)
             }
         }
     }
@@ -134,6 +163,8 @@ final class AppSettings {
             self.useBuiltInRecording = defaults.bool(forKey: Keys.useBuiltInRecording)
         }
         self.launchOnStartup = defaults.bool(forKey: Keys.launchOnStartup)
+        self.notionEnabled = defaults.bool(forKey: Keys.notionEnabled)
+        self.notionDatabaseId = defaults.string(forKey: Keys.notionDatabaseId) ?? ""
     }
 
     // MARK: - UserDefaults keys (centralized to avoid string typos)
@@ -149,8 +180,14 @@ final class AppSettings {
         static let customShortcutName  = "jot.settings.customShortcutName"
         static let useBuiltInRecording = "jot.settings.useBuiltInRecording"
         static let launchOnStartup     = "jot.settings.launchOnStartup"
+        static let notionEnabled       = "jot.settings.notionEnabled"
+        static let notionDatabaseId    = "jot.settings.notionDatabaseId"
     }
 
     /// Keychain `account` for the API key entry. The `service` is set in `init`.
     static let apiKeyAccount = "api_key"
+
+    /// Keychain `account` for the Notion integration token. Separate from
+    /// `apiKeyAccount` so the two secrets are independently rotatable.
+    static let notionTokenAccount = "notion_token"
 }

@@ -280,6 +280,85 @@ struct MeetingBatchAccumulatorTests {
         #expect(items.isEmpty, "Detached emitter should swallow ingests rather than crash")
     }
 
+    // MARK: - Regression: settle-task self-cancellation (v0.4.3)
+
+    /// Records `Task.isCancelled` at the moment the accumulator's emitter
+    /// is called, so the regression test below can assert the timer-driven
+    /// flush isn't running inside a cancelled Task.
+    private actor CancelProbe {
+        private(set) var observedCancellations: [Bool] = []
+
+        func record() {
+            observedCancellations.append(Task.isCancelled)
+        }
+
+        func snapshot() -> [Bool] { observedCancellations }
+    }
+
+    /// v0.4.2 had a latent bug where `flushNow` called `settleTask?.cancel()`
+    /// on itself when invoked from the settle timer. Cancellation propagated
+    /// into the emitter and any `URLSession` upload kicked off downstream
+    /// failed with `URLError(.cancelled)` — every first-time recording
+    /// transcription surfaced as "Network error: cancelled" until the user
+    /// clicked Retry. This test wires a `CancelProbe` emitter so the
+    /// regression is observable without a real URLSession.
+    @Test
+    func timerDrivenFlush_doesNotCancelOwnTask() async {
+        let acc = MeetingBatchAccumulator(settleDelay: Self.settleDelay)
+        let probe = CancelProbe()
+        await acc.setEmitter { [probe] _ in
+            await probe.record()
+        }
+
+        let startedAt = Self.anchoredStart()
+        await acc.noteRecordingStarted(snapshot: Self.makeSnapshot(), at: startedAt)
+        let url = Self.url("solo.mp3")
+        await acc.ingest(url, creationDate: startedAt.addingTimeInterval(60))
+        await acc.noteRecordingStopped(at: startedAt.addingTimeInterval(120))
+
+        await Self.waitForSettle()
+
+        let observed = await probe.snapshot()
+        #expect(observed == [false],
+                "Timer-driven flush must run the emitter on a non-cancelled Task — \(observed)")
+    }
+
+    /// Double-tap regression: a previous session's settle task must NOT
+    /// fire a stray flush after a new `noteRecordingStarted` has swapped
+    /// in its session. `flushNow` no longer self-cancels (see above), so
+    /// `noteRecordingStarted` is now responsible for cancelling the
+    /// pending settle before it draws the new session.
+    @Test
+    func newRecordingStarted_cancelsPriorSettleTask() async {
+        let (acc, sink) = await Self.makeAccumulator()
+        let startedAt1 = Self.anchoredStart()
+        await acc.noteRecordingStarted(snapshot: Self.makeSnapshot(name: "First"), at: startedAt1)
+        await acc.ingest(Self.url("first.mp3"), creationDate: startedAt1.addingTimeInterval(60))
+        await acc.noteRecordingStopped(at: startedAt1.addingTimeInterval(120))
+
+        // Start a second recording before the settle for the first one
+        // expires — the prior settle must be cancelled so it doesn't
+        // later wake up and prematurely flush the new session.
+        let startedAt2 = Date().addingTimeInterval(-30)
+        await acc.noteRecordingStarted(snapshot: Self.makeSnapshot(name: "Second"), at: startedAt2)
+        await acc.ingest(Self.url("second.mp3"), creationDate: startedAt2.addingTimeInterval(5))
+
+        // Wait long enough that the *first* session's settle would've
+        // fired if it hadn't been cancelled.
+        await Self.waitForSettle()
+
+        let items = await sink.snapshot()
+        // Only the first session's flush (triggered synchronously by the
+        // second noteRecordingStarted) should have emitted; the second
+        // session is still in its window.
+        #expect(items.count == 1, "Expected exactly one emit (first session's flush), got \(items.count)")
+        if case .single(let u) = items.first {
+            #expect(u == Self.url("first.mp3"))
+        } else {
+            Issue.record("Expected first session to emit as .single")
+        }
+    }
+
     @Test
     func stop_flushesBufferedBatchEvenWithoutSettle() async {
         let (acc, sink) = await Self.makeAccumulator()

@@ -31,6 +31,19 @@ struct FileOrganizerIntegrationTests {
         return url
     }
 
+    /// Tiny stand-in for a real `verbose_json` body. FileOrganizer's
+    /// pretty-printer only requires it parse as JSON; the test
+    /// assertions read the `.txt` for transcript content.
+    private static func fakeTranscriptJSON(text: String = "T") -> Data {
+        let payload: [String: Any] = [
+            "task": "transcribe",
+            "duration": 1.0,
+            "text": text,
+            "segments": [["id": 0, "start": 0.0, "end": 1.0, "text": text]]
+        ]
+        return try! JSONSerialization.data(withJSONObject: payload, options: [])
+    }
+
     // MARK: - Success path
 
     @Test
@@ -43,18 +56,25 @@ struct FileOrganizerIntegrationTests {
 
         let folder = try await organizer.organize(
             audio: audio,
-            transcript: "hello world",
+            transcriptText: "hello world",
+            transcriptJSON: Self.fakeTranscriptJSON(text: "hello world"),
             outputRoot: output
         )
 
         // Folder name = audio basename without extension
         #expect(folder.lastPathComponent == "2026-05-27_14-24_Client_Call")
-        // Transcript exists, contains what we wrote
+        // .txt exists, contains what we wrote
         let transcript = try String(
             contentsOf: folder.appendingPathComponent("2026-05-27_14-24_Client_Call.txt"),
             encoding: .utf8
         )
         #expect(transcript == "hello world")
+        // .json exists alongside the .txt (v0.4.4)
+        let jsonURL = folder.appendingPathComponent("2026-05-27_14-24_Client_Call.json")
+        #expect(FileManager.default.fileExists(atPath: jsonURL.path(percentEncoded: false)),
+                ".json should be written alongside the .txt")
+        let jsonText = try String(contentsOf: jsonURL, encoding: .utf8)
+        #expect(jsonText.contains("\"text\""), "JSON should carry the verbose_json `text` field")
         // Audio was moved into the new folder
         let movedAudio = folder.appendingPathComponent("2026-05-27_14-24_Client_Call.mp3")
         #expect(FileManager.default.fileExists(atPath: movedAudio.path(percentEncoded: false)))
@@ -70,7 +90,12 @@ struct FileOrganizerIntegrationTests {
 
         let audio = try Self.putAudio(named: "demo.m4a", in: watch)
         let organizer = FileOrganizer()
-        let folder = try await organizer.organize(audio: audio, transcript: "x", outputRoot: output)
+        let folder = try await organizer.organize(
+            audio: audio,
+            transcriptText: "x",
+            transcriptJSON: Self.fakeTranscriptJSON(),
+            outputRoot: output
+        )
 
         #expect(folder.lastPathComponent == "demo")
         let movedAudio = folder.appendingPathComponent("demo.m4a")
@@ -92,7 +117,12 @@ struct FileOrganizerIntegrationTests {
 
         let audio = try Self.putAudio(named: "meeting.wav", in: watch)
         let organizer = FileOrganizer()
-        let folder = try await organizer.organize(audio: audio, transcript: "t", outputRoot: output)
+        let folder = try await organizer.organize(
+            audio: audio,
+            transcriptText: "t",
+            transcriptJSON: Self.fakeTranscriptJSON(),
+            outputRoot: output
+        )
 
         #expect(folder.lastPathComponent == "meeting-2")
     }
@@ -107,7 +137,12 @@ struct FileOrganizerIntegrationTests {
         let missing = watch.appendingPathComponent("not-here.mp3")
         let organizer = FileOrganizer()
         await #expect(throws: FileOrganizerError.self) {
-            _ = try await organizer.organize(audio: missing, transcript: "t", outputRoot: output)
+            _ = try await organizer.organize(
+                audio: missing,
+                transcriptText: "t",
+                transcriptJSON: Self.fakeTranscriptJSON(),
+                outputRoot: output
+            )
         }
     }
 
@@ -123,7 +158,12 @@ struct FileOrganizerIntegrationTests {
         let audio = try Self.putAudio(named: "meeting.mp3", in: watch)
         let organizer = FileOrganizer()
         await #expect(throws: FileOrganizerError.self) {
-            _ = try await organizer.organize(audio: audio, transcript: "t", outputRoot: output)
+            _ = try await organizer.organize(
+                audio: audio,
+                transcriptText: "t",
+                transcriptJSON: Self.fakeTranscriptJSON(),
+                outputRoot: output
+            )
         }
     }
 
@@ -168,7 +208,10 @@ struct FileOrganizerIntegrationTests {
         // happy-path-with-collision and the audio still moves).
         let organizer = FileOrganizer()
         let folder = try await organizer.organize(
-            audio: audio, transcript: "x", outputRoot: output
+            audio: audio,
+            transcriptText: "x",
+            transcriptJSON: Self.fakeTranscriptJSON(),
+            outputRoot: output
         )
         #expect(folder.lastPathComponent == "rollback-2")
         // And the colliding "rollback" folder is left undisturbed.

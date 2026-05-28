@@ -31,6 +31,16 @@ struct FileOrganizerMultiPartTests {
         return url
     }
 
+    /// Tiny verbose_json stand-in for tests that don't care about the
+    /// JSON contents — FileOrganizer only needs it to parse.
+    private static func fakeTranscriptJSON(text: String = "T") -> Data {
+        let payload: [String: Any] = [
+            "text": text, "duration": 1.0,
+            "segments": [["id": 0, "start": 0.0, "end": 1.0, "text": text]]
+        ]
+        return try! JSONSerialization.data(withJSONObject: payload, options: [])
+    }
+
     // MARK: - Happy path
 
     @Test
@@ -45,7 +55,8 @@ struct FileOrganizerMultiPartTests {
         let organizer = FileOrganizer()
         let folder = try await organizer.organize(
             audioParts: [p1, p2, p3],
-            transcript: "alpha\n\nbeta\n\ngamma",
+            transcriptText: "alpha\n\nbeta\n\ngamma",
+            transcriptJSON: Self.fakeTranscriptJSON(text: "alpha\n\nbeta\n\ngamma"),
             outputRoot: output
         )
 
@@ -80,7 +91,8 @@ struct FileOrganizerMultiPartTests {
         let organizer = FileOrganizer()
         let folder = try await organizer.organize(
             audioParts: [only],
-            transcript: "single",
+            transcriptText: "single",
+            transcriptJSON: Self.fakeTranscriptJSON(text: "single"),
             outputRoot: output
         )
 
@@ -105,7 +117,8 @@ struct FileOrganizerMultiPartTests {
         await #expect(throws: FileOrganizerError.self) {
             try await organizer.organize(
                 audioParts: [],
-                transcript: "x",
+                transcriptText: "x",
+                transcriptJSON: Self.fakeTranscriptJSON(),
                 outputRoot: output
             )
         }
@@ -123,7 +136,8 @@ struct FileOrganizerMultiPartTests {
         await #expect(throws: FileOrganizerError.self) {
             try await organizer.organize(
                 audioParts: [real, ghost],
-                transcript: "x",
+                transcriptText: "x",
+                transcriptJSON: Self.fakeTranscriptJSON(),
                 outputRoot: output
             )
         }
@@ -171,7 +185,8 @@ struct FileOrganizerMultiPartTests {
         await #expect(throws: FileOrganizerError.self) {
             try await organizer.organize(
                 audioParts: [p1, p2],
-                transcript: "x",
+                transcriptText: "x",
+                transcriptJSON: Self.fakeTranscriptJSON(),
                 outputRoot: output
             )
         }

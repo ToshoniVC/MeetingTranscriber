@@ -285,7 +285,7 @@ actor ProcessingPipeline {
 
         do {
             // 1. Transcribe.
-            let transcript = try await transcriptionClient.transcribe(
+            let result = try await transcriptionClient.transcribe(
                 audio: workingURL,
                 baseURL: config.apiBaseURL,
                 model: config.model,
@@ -293,12 +293,16 @@ actor ProcessingPipeline {
                 prompt: prompt
             )
 
-            // 2. Organize: per-meeting folder + transcript + (optional)
-            // context.md + move audio. Prompt is the same string that just
-            // went to the API — kept on disk for reproducibility (PRD §8).
+            // 2. Organize: per-meeting folder + `.txt` + `.json` +
+            // (optional) context.md + move audio. Prompt is the same
+            // string that just went to the API — kept on disk for
+            // reproducibility (PRD §8). Since v0.4.4 we write both the
+            // plain text (fast read in Quick Look) AND the verbose JSON
+            // (timestamps + segments).
             let meetingFolder = try await fileOrganizer.organize(
                 audio: workingURL,
-                transcript: transcript,
+                transcriptText: result.text,
+                transcriptJSON: result.rawJSON,
                 context: prompt,
                 outputRoot: config.outputFolder
             )
@@ -347,12 +351,17 @@ actor ProcessingPipeline {
                 let meetingName = snapshot?.meetingName
                     ?? workingURL.deletingPathExtension().lastPathComponent
                 let additionalContext = snapshot?.resolvedCompiledContext ?? ""
+                // Send Notion the timestamped rendering so the meeting
+                // page reads like minutes with jump-back anchors, not
+                // one wall of text. Falls back to the plain text when
+                // the endpoint returned no segments.
+                let notionBody = TimestampedTranscriptFormatter.formatBody(for: result)
                 scheduleNotionWrite(
                     entryId: entryId,
                     config: notionConfig,
                     writer: writer,
                     meetingName: meetingName,
-                    transcript: transcript,
+                    transcript: notionBody,
                     additionalContext: additionalContext
                 )
             }
@@ -408,29 +417,32 @@ actor ProcessingPipeline {
             // 2. Transcribe each part in order. Same prompt for every
             // part — the compiled context is the user's whole-meeting
             // intent and applies to all parts.
-            var transcripts: [String] = []
-            transcripts.reserveCapacity(renamedParts.count)
+            var partResults: [TranscriptionResult] = []
+            partResults.reserveCapacity(renamedParts.count)
             for part in renamedParts {
-                let text = try await transcriptionClient.transcribe(
+                let result = try await transcriptionClient.transcribe(
                     audio: part,
                     baseURL: config.apiBaseURL,
                     model: config.model,
                     apiKey: config.apiKey,
                     prompt: prompt
                 )
-                transcripts.append(text)
+                partResults.append(result)
             }
 
-            // 3. Join with a blank line between parts — keeps the
-            // transcript clean for downstream Claude Code use (per the
-            // v0.4.1 design choice).
-            let combinedTranscript = transcripts.joined(separator: "\n\n")
+            // 3. Merge per-part results into one logical transcription.
+            // Segment timestamps are shifted by cumulative part duration
+            // so the on-disk JSON + Notion rendering read as one
+            // continuous recording rather than each part restarting at
+            // zero.
+            let mergedResult = TranscriptionResult.merging(partResults)
 
             // 4. Organize: one meeting folder containing all parts + the
-            // combined transcript + context.md.
+            // merged transcript (.txt + .json) + context.md.
             let meetingFolder = try await fileOrganizer.organize(
                 audioParts: renamedParts,
-                transcript: combinedTranscript,
+                transcriptText: mergedResult.text,
+                transcriptJSON: mergedResult.rawJSON,
                 context: prompt,
                 outputRoot: config.outputFolder
             )
@@ -460,14 +472,16 @@ actor ProcessingPipeline {
             ))
             onStateChange(.idle)
 
-            // 7. One Notion write for the whole meeting.
+            // 7. One Notion write for the whole meeting. Same
+            // timestamped rendering as the single-file path.
             if case .attempt(let notionConfig, let writer) = notionMode {
+                let notionBody = TimestampedTranscriptFormatter.formatBody(for: mergedResult)
                 scheduleNotionWrite(
                     entryId: entryId,
                     config: notionConfig,
                     writer: writer,
                     meetingName: snapshot.meetingName,
-                    transcript: combinedTranscript,
+                    transcript: notionBody,
                     additionalContext: snapshot.resolvedCompiledContext
                 )
             }

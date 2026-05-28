@@ -28,9 +28,22 @@ enum FileOrganizerError: Error, Equatable {
 /// Lays down the per-meeting folder structure required by PRD §4.2:
 ///   `<outputRoot>/<meetingName>/<meetingName>.{mp3|m4a|wav}` (moved here)
 ///   `<outputRoot>/<meetingName>/<meetingName>.txt`            (just written)
+///   `<outputRoot>/<meetingName>/<meetingName>.json`           (just written)
 ///
 /// Where `meetingName = sourceURL.deletingPathExtension().lastPathComponent`
 /// (e.g., `2026-05-27_14-24_Client_Call.mp3` → `2026-05-27_14-24_Client_Call`).
+///
+/// **v0.4.4 added the `.json` artifact alongside the existing `.txt`.**
+/// The `.txt` is the plain transcript (same as pre-0.4.4 — fast to read
+/// in Quick Look or any text editor). The `.json` is the pretty-printed
+/// `verbose_json` body the transcription endpoint returned, carrying
+/// `duration` and `segments[]` with `[start, end, text]` per segment so
+/// you (or a downstream tool) can jump back to specific moments. We write
+/// the *verbatim* bytes the server returned (re-prettied for readability),
+/// not a re-encoded approximation, so any fields we don't model (logprobs,
+/// language probabilities, etc.) survive the round-trip. Multi-part
+/// recordings get a synthesized JSON whose segments have cumulative
+/// time offsets — see `TranscriptionResult.merging(_:)`.
 ///
 /// The Watch Folder ends empty for this file — the source audio is *moved*,
 /// not copied (PRD §4.2: "Ensure no residual data remains in the Watch Folder").
@@ -38,10 +51,11 @@ enum FileOrganizerError: Error, Equatable {
 /// If `<meetingName>/` already exists in the Output Folder, we append `-2`,
 /// `-3`, … until we find a free name. Never overwrite.
 ///
-/// **Rollback contract.** If the audio move fails *after* the transcript has
-/// already been written, we delete the transcript and the (empty) meeting
-/// folder so we don't leave a half-state. The original audio file stays put
-/// in the Watch Folder (so retry works).
+/// **Rollback contract.** If the audio move fails *after* the transcripts
+/// have already been written, we delete both `.txt` and `.json`, the
+/// `context.md` if any, and the (empty) meeting folder so we don't leave
+/// a half-state. The original audio file stays put in the Watch Folder
+/// (so retry works).
 struct FileOrganizer: Sendable {
 
     /// Inject a custom `FileManager` for tests that want to simulate I/O
@@ -58,13 +72,15 @@ struct FileOrganizer: Sendable {
     @discardableResult
     func organize(
         audio sourceURL: URL,
-        transcript: String,
+        transcriptText: String,
+        transcriptJSON: Data,
         context: String? = nil,
         outputRoot: URL
     ) async throws -> URL {
         try await organize(
             audioParts: [sourceURL],
-            transcript: transcript,
+            transcriptText: transcriptText,
+            transcriptJSON: transcriptJSON,
             context: context,
             outputRoot: outputRoot
         )
@@ -80,8 +96,14 @@ struct FileOrganizer: Sendable {
     ///     part's basename names the meeting folder + transcript. All
     ///     parts are moved into the new folder under their existing
     ///     filenames.
-    ///   - transcript: the combined transcript (caller concatenates per-part
-    ///     transcripts upstream — `FileOrganizer` is dumb about ordering).
+    ///   - transcriptText: the plain transcript text written as
+    ///     `<meetingName>.txt`. For multi-part meetings the caller has
+    ///     already concatenated per-part text upstream.
+    ///   - transcriptJSON: the verbatim `verbose_json` body the API
+    ///     returned. Pretty-printed and written as `<meetingName>.json`.
+    ///     For multi-part meetings the caller merges per-part responses
+    ///     upstream — `FileOrganizer` is dumb about ordering and just
+    ///     persists whatever bytes it's handed.
     ///   - outputRoot: the user-chosen Output Folder (already-resolved URL).
     ///     Caller is responsible for `startAccessingSecurityScopedResource()`.
     /// - Returns: the absolute URL of the meeting folder just created.
@@ -94,7 +116,8 @@ struct FileOrganizer: Sendable {
     @discardableResult
     func organize(
         audioParts: [URL],
-        transcript: String,
+        transcriptText: String,
+        transcriptJSON: Data,
         context: String? = nil,
         outputRoot: URL
     ) async throws -> URL {
@@ -125,20 +148,39 @@ struct FileOrganizer: Sendable {
             throw FileOrganizerError.outputFolderUnreachable(meetingFolder)
         }
 
-        // 4a. Write the transcript next to where the audio will land.
-        let transcriptURL = meetingFolder.appendingPathComponent("\(baseName).txt")
+        // 4a. Write the plain transcript next to where the audio will
+        // land. This is the fast-to-read artifact — open in Quick Look,
+        // any editor, or the system grep without parsing JSON. Same
+        // content as pre-0.4.4.
+        let transcriptTextURL = meetingFolder.appendingPathComponent("\(baseName).txt")
         do {
-            try transcript.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            try transcriptText.write(to: transcriptTextURL, atomically: true, encoding: .utf8)
         } catch {
             try? fileManager.removeItem(at: meetingFolder)
             throw FileOrganizerError.writeTranscriptFailed(error.localizedDescription)
         }
 
-        // 4b. Optionally write context.md alongside the transcript — the
-        // exact compiled prompt that was sent to Whisper, for
+        // 4b. Write the verbose-JSON transcript alongside the .txt. We
+        // re-prettify the server's bytes so the file is human-readable
+        // when opened in a text editor. If pretty-printing fails (the
+        // server sent something `JSONSerialization` can't parse), we
+        // fall back to the raw bytes so the user still has *something*
+        // to inspect rather than losing the segments outright.
+        let transcriptJSONURL = meetingFolder.appendingPathComponent("\(baseName).json")
+        let bytesToWrite = Self.prettyPrint(transcriptJSON) ?? transcriptJSON
+        do {
+            try bytesToWrite.write(to: transcriptJSONURL, options: .atomic)
+        } catch {
+            try? fileManager.removeItem(at: transcriptTextURL)
+            try? fileManager.removeItem(at: meetingFolder)
+            throw FileOrganizerError.writeTranscriptFailed(error.localizedDescription)
+        }
+
+        // 4c. Optionally write context.md alongside the transcripts —
+        // the exact compiled prompt that was sent to Whisper, for
         // reproducibility (PRD §8). Best-effort: a failed context write
-        // doesn't roll back the transcript, since the transcript itself
-        // is still valuable on its own.
+        // doesn't roll back the transcripts, since they're still valuable
+        // on their own.
         let contextURL = meetingFolder.appendingPathComponent("context.md")
         var contextWritten = false
         if let context, !context.isEmpty {
@@ -166,7 +208,8 @@ struct FileOrganizer: Sendable {
                 for pair in movedPairs {
                     try? fileManager.moveItem(at: pair.destination, to: pair.original)
                 }
-                try? fileManager.removeItem(at: transcriptURL)
+                try? fileManager.removeItem(at: transcriptTextURL)
+                try? fileManager.removeItem(at: transcriptJSONURL)
                 if contextWritten {
                     try? fileManager.removeItem(at: contextURL)
                 }
@@ -180,6 +223,22 @@ struct FileOrganizer: Sendable {
             : "\(audioParts.count) parts (\(firstPart.lastPathComponent), …)"
         Log.pipeline.info("Organized \(partsLabel, privacy: .public) → \(meetingFolder.lastPathComponent, privacy: .public)")
         return meetingFolder
+    }
+
+    /// Re-emit `data` as `JSONSerialization`-prettified bytes. Returns
+    /// `nil` when the bytes don't parse as JSON (server sent text/HTML
+    /// despite our `response_format=verbose_json` request) so the caller
+    /// can fall back to the raw bytes. Sorted keys keep the diff stable
+    /// across runs of the same meeting in case someone re-transcribes
+    /// and diffs the result.
+    private static func prettyPrint(_ data: Data) -> Data? {
+        guard let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]) else {
+            return nil
+        }
+        return try? JSONSerialization.data(
+            withJSONObject: object,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        )
     }
 
     /// Return a URL under `outputRoot` whose folder name doesn't yet exist.

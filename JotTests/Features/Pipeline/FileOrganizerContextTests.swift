@@ -23,6 +23,15 @@ struct FileOrganizerContextTests {
         return url
     }
 
+    /// Tiny verbose_json stand-in — FileOrganizer only needs it to parse.
+    private static func fakeTranscriptJSON() -> Data {
+        let payload: [String: Any] = [
+            "text": "T", "duration": 1.0,
+            "segments": [["id": 0, "start": 0.0, "end": 1.0, "text": "T"]]
+        ]
+        return try! JSONSerialization.data(withJSONObject: payload, options: [])
+    }
+
     @Test
     func organize_withContext_writesContextMD() async throws {
         let (watch, output) = try Self.makeFolders()
@@ -34,7 +43,8 @@ struct FileOrganizerContextTests {
 
         let folder = try await FileOrganizer().organize(
             audio: audio,
-            transcript: "T",
+            transcriptText: "T",
+            transcriptJSON: Self.fakeTranscriptJSON(),
             context: "Organization: Acme\nStaff: Alice",
             outputRoot: output
         )
@@ -59,7 +69,8 @@ struct FileOrganizerContextTests {
 
         let folder = try await FileOrganizer().organize(
             audio: audio,
-            transcript: "T",
+            transcriptText: "T",
+            transcriptJSON: Self.fakeTranscriptJSON(),
             context: nil,
             outputRoot: output
         )
@@ -79,7 +90,8 @@ struct FileOrganizerContextTests {
 
         let folder = try await FileOrganizer().organize(
             audio: audio,
-            transcript: "T",
+            transcriptText: "T",
+            transcriptJSON: Self.fakeTranscriptJSON(),
             context: "",
             outputRoot: output
         )

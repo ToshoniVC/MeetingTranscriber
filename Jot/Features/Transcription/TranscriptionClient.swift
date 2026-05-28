@@ -36,7 +36,10 @@ actor TranscriptionClient {
     ///   - model: model string (e.g., `whisper-large-v3` for Groq,
     ///     `whisper-1` for OpenAI).
     ///   - apiKey: bearer token. Never logged.
-    /// - Returns: the transcript text on success.
+    /// - Returns: a `TranscriptionResult` carrying the transcript text,
+    ///   the model-reported duration, the per-segment metadata, and the
+    ///   verbatim JSON body the server returned (so callers can persist
+    ///   the canonical response on disk).
     /// - Throws: a `TranscriptionError` describing what went wrong.
     func transcribe(
         audio: URL,
@@ -44,7 +47,7 @@ actor TranscriptionClient {
         model: String,
         apiKey: String,
         prompt: String? = nil
-    ) async throws -> String {
+    ) async throws -> TranscriptionResult {
         try validate(audio: audio, baseURL: baseURL, model: model, apiKey: apiKey)
 
         do {
@@ -85,7 +88,7 @@ actor TranscriptionClient {
         model: String,
         apiKey: String,
         prompt: String?
-    ) async throws -> String {
+    ) async throws -> TranscriptionResult {
         let request = try TranscriptionRequest(
             audio: audio,
             baseURL: baseURL,
@@ -136,22 +139,36 @@ actor TranscriptionClient {
         let gap = (duration >= 0 && lastEnd >= 0) ? duration - lastEnd : -1
         Log.transcription.info("Transcribed: duration=\(duration, privacy: .public)s lastSegmentEnd=\(lastEnd, privacy: .public)s gap=\(gap, privacy: .public)s textChars=\(decoded.text.count, privacy: .public)")
 
-        return decoded.text.trimmingCharacters(in: CharacterSet.newlines)
+        let segments: [TranscriptionResult.Segment] = (decoded.segments ?? []).compactMap { raw in
+            guard let start = raw.start, let end = raw.end, let text = raw.text else { return nil }
+            return TranscriptionResult.Segment(start: start, end: end, text: text)
+        }
+
+        return TranscriptionResult(
+            text: decoded.text.trimmingCharacters(in: CharacterSet.newlines),
+            duration: decoded.duration,
+            segments: segments,
+            rawJSON: data
+        )
     }
 
     // MARK: - Decoding
 
-    /// Subset of the `verbose_json` response we care about. The full payload
+    /// Subset of the `verbose_json` response we decode. The full payload
     /// has more fields (`task`, `language`, per-segment metadata like
     /// `tokens`, `avg_logprob`, etc.); we keep the model narrow so a future
-    /// server-side addition doesn't break decoding.
+    /// server-side addition doesn't break decoding. The unmodeled fields
+    /// still survive the round-trip on disk because `FileOrganizer` writes
+    /// the verbatim `rawJSON` bytes, not a re-encoded form of this struct.
     private struct VerboseTranscriptionResponse: Decodable {
         let text: String
         let duration: Double?
         let segments: [Segment]?
 
         struct Segment: Decodable {
+            let start: Double?
             let end: Double?
+            let text: String?
         }
     }
 

@@ -45,6 +45,13 @@ enum NotionPageBuilder {
     ///     resolved at runtime via `NotionClient.describeDatabase(...)`.
     ///     Notion requires the literal property name — not a stable key —
     ///     in the create-page request.
+    ///   - datePropertyName: name of the first `date`-typed property in
+    ///     the database, if any. When supplied alongside `meetingDate`,
+    ///     the page is stamped with that date so the database view sorts
+    ///     chronologically. `nil` skips the date stamp entirely.
+    ///   - meetingDate: the date to stamp into `datePropertyName`,
+    ///     formatted as `YYYY-MM-DD` in the user's local time zone.
+    ///     Typically `Date()` (today). `nil` skips the date stamp.
     ///   - meetingName: meeting display name. Used as the page title.
     ///   - transcript: full transcript text. Empty allowed.
     ///   - additionalContext: compiled context text. Empty allowed —
@@ -53,6 +60,8 @@ enum NotionPageBuilder {
     static func build(
         databaseId: String,
         titlePropertyName: String,
+        datePropertyName: String? = nil,
+        meetingDate: Date? = nil,
         meetingName: String,
         transcript: String,
         additionalContext: String
@@ -86,11 +95,16 @@ enum NotionPageBuilder {
             children: contextInitial
         )
 
+        var properties: [String: NotionPropertyValue] = [
+            titlePropertyName: .title([NotionRichText(plainText: meetingName)])
+        ]
+        if let datePropertyName, let meetingDate {
+            properties[datePropertyName] = .date(isoDate: isoDateString(from: meetingDate))
+        }
+
         let create = NotionCreatePageRequest(
             parent: NotionParent(database_id: databaseId),
-            properties: [
-                titlePropertyName: .title([NotionRichText(plainText: meetingName)])
-            ],
+            properties: properties,
             children: [notesBlock, transcriptBlock, contextBlock]
         )
 
@@ -100,6 +114,21 @@ enum NotionPageBuilder {
             contextOverflow: contextOverflow
         )
     }
+
+    /// `YYYY-MM-DD` in the user's local time zone — the wall-clock date
+    /// they'd expect to see on the meeting page. POSIX locale keeps the
+    /// format stable regardless of user-locale settings.
+    static func isoDateString(from date: Date) -> String {
+        isoDateFormatter.string(from: date)
+    }
+
+    private static let isoDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 
     // MARK: - Paragraph splitting
 

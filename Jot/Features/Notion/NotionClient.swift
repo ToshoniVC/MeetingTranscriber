@@ -36,6 +36,8 @@ actor NotionClient: NotionMeetingWriter {
         let build = NotionPageBuilder.build(
             databaseId: config.databaseId,
             titlePropertyName: info.titlePropertyName,
+            datePropertyName: info.datePropertyName,
+            meetingDate: Date(),
             meetingName: meetingName,
             transcript: transcript,
             additionalContext: additionalContext
@@ -108,7 +110,22 @@ actor NotionClient: NotionMeetingWriter {
         guard let titleKey = response.properties.first(where: { $0.value.type == "title" })?.key else {
             throw NotionError.missingTitleProperty
         }
-        return NotionDatabaseInfo(title: title, titlePropertyName: titleKey)
+
+        // Optional date column — if the database has one, we stamp it
+        // with today's date when creating pages. Dictionary order is
+        // unspecified; if there are multiple date columns we pick one
+        // deterministically by sorted name so reruns are consistent.
+        let dateKey = response.properties
+            .filter { $0.value.type == "date" }
+            .map { $0.key }
+            .sorted()
+            .first
+
+        return NotionDatabaseInfo(
+            title: title,
+            titlePropertyName: titleKey,
+            datePropertyName: dateKey
+        )
     }
 
     // MARK: - HTTP helpers

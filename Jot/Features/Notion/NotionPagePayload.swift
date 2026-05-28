@@ -35,14 +35,24 @@ struct NotionAppendChildrenRequest: Encodable, Equatable {
 
 // MARK: - Property values
 
-/// Only the title property is set by Jot; we leave everything else at
-/// whatever default the database defines. Modeled as an enum so adding
-/// other property types later doesn't require restructuring callers.
+/// Property values Jot writes onto a created page. Title is always set;
+/// date is set when the target database has a `date`-typed property (the
+/// builder receives the resolved property name + the date to stamp).
+/// Modeled as an enum so adding other property types later doesn't
+/// require restructuring callers.
 enum NotionPropertyValue: Encodable, Equatable {
     case title([NotionRichText])
 
+    /// `isoDate` is the `YYYY-MM-DD` form Notion accepts as the `start`
+    /// field of a date property. Encoded as `{"date":{"start": ...}}`.
+    case date(isoDate: String)
+
     enum CodingKeys: String, CodingKey {
-        case title
+        case title, date
+    }
+
+    enum DateKeys: String, CodingKey {
+        case start
     }
 
     func encode(to encoder: Encoder) throws {
@@ -50,6 +60,9 @@ enum NotionPropertyValue: Encodable, Equatable {
         switch self {
         case .title(let runs):
             try c.encode(runs, forKey: .title)
+        case .date(let isoDate):
+            var inner = c.nestedContainer(keyedBy: DateKeys.self, forKey: .date)
+            try inner.encode(isoDate, forKey: .start)
         }
     }
 }

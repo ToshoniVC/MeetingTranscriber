@@ -100,11 +100,32 @@ struct NotionClientIntegrationTests {
 
         #expect(info.title == "Meetings")
         #expect(info.titlePropertyName == "Name")
+        // The fixture body declares a "Date" column — should be discovered.
+        #expect(info.datePropertyName == "Date")
 
         let req = try #require(MockURLProtocol.requests.first)
         #expect(req.url?.path == "/v1/databases/\(Self.databaseId)")
         #expect(req.value(forHTTPHeaderField: "Authorization") == "Bearer \(Self.token)")
         #expect(req.value(forHTTPHeaderField: "Notion-Version") == NotionConfig.defaultAPIVersion)
+    }
+
+    @Test
+    func describeDatabase_withoutDateProperty_setsDatePropertyNameToNil() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        let body = """
+        {
+            "object": "database",
+            "title": [{"plain_text": "Meetings"}],
+            "properties": {"Name": {"type": "title"}}
+        }
+        """
+        MockURLProtocol.responder = { _ in
+            (Self.httpResponse(status: 200), Data(body.utf8))
+        }
+        let client = NotionClient(session: MockURLSession.make())
+        let info = try await client.describeDatabase(config: Self.config)
+        #expect(info.datePropertyName == nil)
     }
 
     @Test
@@ -228,6 +249,48 @@ struct NotionClientIntegrationTests {
         #expect(bodyString.contains("Hello world."))
         #expect(bodyString.contains("Org context."))
         #expect(bodyString.contains("\"database_id\":\"\(Self.databaseId)\""))
+
+        // Date stamp: today's date in the local TZ should be embedded
+        // under the "Date" property the fixture declares.
+        let today = NotionPageBuilder.isoDateString(from: Date())
+        #expect(bodyString.contains("\"start\":\"\(today)\""))
+    }
+
+    @Test
+    func createMeetingPage_withoutDateColumn_omitsDateStamp() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+
+        let dbBody = """
+        {
+            "object": "database",
+            "title": [{"plain_text": "Meetings"}],
+            "properties": {"Name": {"type": "title"}}
+        }
+        """
+        MockURLProtocol.responder = { req in
+            if req.url?.path == "/v1/databases/\(Self.databaseId)" {
+                return (Self.httpResponse(status: 200), Data(dbBody.utf8))
+            }
+            if req.url?.path == "/v1/pages" {
+                return (Self.httpResponse(status: 200), Self.createdPageBody())
+            }
+            return (Self.httpResponse(status: 500), Data())
+        }
+
+        let client = NotionClient(session: MockURLSession.make())
+        _ = try await client.createMeetingPage(
+            config: Self.config,
+            meetingName: "x",
+            transcript: "y",
+            additionalContext: "z"
+        )
+        let pagesIndex = try #require(
+            MockURLProtocol.requests.firstIndex(where: { $0.url?.path == "/v1/pages" })
+        )
+        let bodyString = String(data: MockURLProtocol.requestBodies[pagesIndex], encoding: .utf8) ?? ""
+        // No date property emitted when the database has no date column.
+        #expect(!bodyString.contains("\"start\":"))
     }
 
     @Test

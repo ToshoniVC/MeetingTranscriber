@@ -38,6 +38,14 @@ final class PipelineCoordinator {
     /// provider directly.
     private let providerStore: ProviderStore?
 
+    /// v0.5.1: shared `ProcessedFilesLedger` so the
+    /// `ManualUploadCoordinator` can clear entries before staging a
+    /// re-upload, and the `FolderWatcher` we create at start time uses
+    /// the same actor instance instead of its own private one. Nil for
+    /// test contexts that don't want a long-lived ledger — the watcher
+    /// will fall back to its default `ProcessedFilesLedger()`.
+    private let processedFilesLedger: ProcessedFilesLedger?
+
     /// Current pipeline (if running). Nil between starts.
     private var pipeline: ProcessingPipeline?
 
@@ -58,7 +66,8 @@ final class PipelineCoordinator {
         menuBar: MenuBarController,
         meetingContextStore: MeetingContextStore? = nil,
         batchAccumulator: MeetingBatchAccumulator? = nil,
-        providerStore: ProviderStore? = nil
+        providerStore: ProviderStore? = nil,
+        processedFilesLedger: ProcessedFilesLedger? = nil
     ) {
         self.settings = settings
         self.auditLog = auditLog
@@ -66,6 +75,7 @@ final class PipelineCoordinator {
         self.meetingContextStore = meetingContextStore
         self.batchAccumulator = batchAccumulator
         self.providerStore = providerStore
+        self.processedFilesLedger = processedFilesLedger
     }
 
     // MARK: - Public API
@@ -170,7 +180,19 @@ final class PipelineCoordinator {
         scopedURLs = [config.watchFolder, config.outputFolder]
 
         do {
-            let watcher = try await FolderWatcher(folderURL: config.watchFolder)
+            // Use the shared `ProcessedFilesLedger` when one was injected
+            // (production path, JotApp owns it). Falls back to the
+            // default per-watcher ledger for tests that don't care about
+            // sharing.
+            let watcher: FolderWatcher
+            if let sharedLedger = processedFilesLedger {
+                watcher = try await FolderWatcher(
+                    folderURL: config.watchFolder,
+                    ledger: sharedLedger
+                )
+            } else {
+                watcher = try await FolderWatcher(folderURL: config.watchFolder)
+            }
             let consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)?
             let pendingRecordingStartedAt: (@Sendable () async -> Date?)?
             let clearPendingMeetingContext: (@Sendable () async -> Void)?

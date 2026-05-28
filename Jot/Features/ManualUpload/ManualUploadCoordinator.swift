@@ -26,25 +26,34 @@ enum ManualUploadStatus: Equatable, Sendable {
 }
 
 /// Orchestrates the manual-upload flow from the user clicking "Upload
-/// Recording…" to the file landing in the Watch Folder ready for the
-/// `FolderWatcher` to pick it up.
+/// Recording…" to the file(s) landing in the Watch Folder ready for the
+/// `FolderWatcher` to pick them up.
 ///
 /// **Pipeline integration.** This coordinator deliberately does *not*
-/// know about `ProcessingPipeline`. It stamps `MeetingContextStore` with
-/// the user-provided metadata and drops the (converted, if needed) file
-/// into the Watch Folder. The existing watcher → pipeline path treats it
-/// as if Audio Hijack had just produced a recording: the same
-/// `consumeMeetingContext` call attaches the snapshot, the same rename
-/// applies the meeting name, the same transcription / Notion / Claude
-/// Code chain runs. No new pipeline entry point, no new audit-log
-/// schema — the upload feature reuses everything downstream of the
-/// watcher's `AsyncStream`.
+/// know about `ProcessingPipeline`. It stamps either
+/// `MeetingContextStore` (single-file path) or
+/// `MeetingBatchAccumulator` (multi-file path, v0.5.1+) with the
+/// user-provided metadata and drops the (converted, if needed) file
+/// into the Watch Folder. The existing watcher → pipeline path treats
+/// it as if Audio Hijack had just produced a recording: the same
+/// `consume`/`peek` calls attach the snapshot, the same rename applies
+/// the meeting name, the same transcription / Notion / Claude Code
+/// chain runs. Multi-file uploads bypass the single-file
+/// `consumeMeetingContext` path entirely by going through the batch
+/// accumulator, which the pipeline already understands.
+///
+/// **Ledger interplay (v0.5.1).** Before each stage we explicitly
+/// `forget` the target path from the watcher's `ProcessedFilesLedger`.
+/// That way a previous failed attempt at the same path — which would
+/// otherwise leave the watcher silently skipping the new copy — can't
+/// block the re-upload. Without this, re-uploading a meeting that
+/// failed once would just see "Manual upload: staged" with no
+/// transcription downstream, which was the v0.5.0 bug report.
 ///
 /// **Serialization.** The flow is single-threaded by virtue of
 /// `@MainActor`. The Upload button is disabled while `status.isBusy`,
 /// so a second upload can't start until the staging step for the
-/// previous one returns. That keeps the `pending` slot single-valued.
-/// Concurrent uploads aren't supported in this phase.
+/// previous one returns. Concurrent uploads aren't supported.
 @MainActor
 @Observable
 final class ManualUploadCoordinator {
@@ -53,6 +62,8 @@ final class ManualUploadCoordinator {
     private let auditLog: AuditLogStore
     private let organizations: OrganizationStore
     private let meetingContextStore: MeetingContextStore
+    private let batchAccumulator: MeetingBatchAccumulator?
+    private let processedFilesLedger: ProcessedFilesLedger?
     private let prompter: any MeetingUploadPrompting
     private let staging: ManualUploadStagingService
     private let conversion: MediaConversionService
@@ -68,6 +79,8 @@ final class ManualUploadCoordinator {
         auditLog: AuditLogStore,
         organizations: OrganizationStore,
         meetingContextStore: MeetingContextStore,
+        batchAccumulator: MeetingBatchAccumulator? = nil,
+        processedFilesLedger: ProcessedFilesLedger? = nil,
         prompter: (any MeetingUploadPrompting)? = nil,
         staging: ManualUploadStagingService = ManualUploadStagingService(),
         conversion: MediaConversionService = MediaConversionService(),
@@ -78,6 +91,8 @@ final class ManualUploadCoordinator {
         self.auditLog = auditLog
         self.organizations = organizations
         self.meetingContextStore = meetingContextStore
+        self.batchAccumulator = batchAccumulator
+        self.processedFilesLedger = processedFilesLedger
         // Default UI dependencies are instantiated inside the init body
         // (not as parameter defaults) because Swift treats default
         // parameter expressions as nonisolated, which would refuse to
@@ -113,7 +128,7 @@ final class ManualUploadCoordinator {
 
     /// Entry point: invoked by the "Upload Recording…" button. Shows
     /// the file picker, collects metadata, performs conversion if
-    /// needed, and stages the file into the Watch Folder. Returns
+    /// needed, and stages the file(s) into the Watch Folder. Returns
     /// silently — outcomes are surfaced via `status` and the audit log.
     func beginUpload() async {
         guard !status.isBusy else { return }
@@ -152,22 +167,41 @@ final class ManualUploadCoordinator {
             throw ManualUploadError.watchFolderUnreachable
         }
 
-        // 2. Pick a source file.
-        guard let source = await filePicker.pick() else {
+        // 2. Pick source file(s).
+        let sources = await filePicker.pick()
+        guard !sources.isEmpty else {
             throw ManualUploadError.userCancelled
         }
-        let kind = try staging.validate(source)
+
+        // 3. Validate every selection up front. Aborting early on a
+        // single bad file is friendlier than staging some-then-failing
+        // and leaving partial state in the Watch Folder.
+        var validated: [(url: URL, kind: ManualUploadMediaKind)] = []
+        for source in sources {
+            let kind = try staging.validate(source)
+            validated.append((source, kind))
+        }
+
+        let displaySource = sources[0].lastPathComponent
+        let description: String
+        if sources.count == 1 {
+            description = displaySource
+        } else {
+            description = "\(displaySource) + \(sources.count - 1) more (one meeting)"
+        }
         auditLog.append(.init(
             kind: .info,
-            sourcePath: source.path(percentEncoded: false),
-            message: "Manual upload: selected \(source.lastPathComponent)"
+            sourcePath: sources[0].path(percentEncoded: false),
+            message: sources.count == 1
+                ? "Manual upload: selected \(displaySource)"
+                : "Manual upload: selected \(sources.count) files for one meeting (\(displaySource), …)"
         ))
-        Log.manualUpload.info("Picked \(source.lastPathComponent, privacy: .public) (\(String(describing: kind), privacy: .public))")
+        Log.manualUpload.info("Picked \(sources.count, privacy: .public) file(s); first: \(displaySource, privacy: .public)")
 
-        // 3. Collect metadata.
+        // 4. Collect metadata once for the whole upload.
         status = .collectingMetadata
         let inputs = await prompter.askForUpload(
-            sourceFilename: source.lastPathComponent,
+            sourceDescription: description,
             organizations: organizations.organizations,
             defaultOrgId: organizations.defaultOrg()?.id
         )
@@ -179,11 +213,7 @@ final class ManualUploadCoordinator {
             throw ManualUploadError.invalidMeetingName
         }
 
-        // 4. Stamp the meeting-context window *before* the file lands in
-        // the Watch Folder. The watcher debounces for ~2 seconds before
-        // emitting, but a small file on a fast disk could in principle
-        // be emitted sooner — opening the window early guarantees the
-        // pipeline's `consume(forFileCreatedAt:)` lookup succeeds.
+        // 5. Compile the snapshot the pipeline will see.
         let startedAt = Date()
         let organization = inputs.organizationId.flatMap { organizations.organization(id: $0) }
         let compiledContext = ContextCompiler.compile(
@@ -191,22 +221,70 @@ final class ManualUploadCoordinator {
             meetingSpecificContext: inputs.meetingSpecificContext,
             organization: organization
         )
-        meetingContextStore.recordStarted(
+        let snapshot = MeetingContextSnapshot(
             meetingName: trimmedName,
             organizationId: inputs.organizationId,
             organizationName: organization?.name,
             meetingSpecificContext: inputs.meetingSpecificContext,
             resolvedCompiledContext: compiledContext,
+            lastEditedAt: startedAt
+        )
+
+        // 6. Dispatch to the right path. Multi-file goes through the
+        // batch accumulator so all parts merge into one Notion page +
+        // one meeting folder. Single-file keeps the v0.5.0 flow via
+        // `MeetingContextStore` so the pipeline's `consume` lookup
+        // still works.
+        let didStartScope = watchFolder.startAccessingSecurityScopedResource()
+        defer { if didStartScope { watchFolder.stopAccessingSecurityScopedResource() } }
+
+        if sources.count == 1, let only = validated.first {
+            try await runSingle(
+                source: only.url,
+                kind: only.kind,
+                snapshot: snapshot,
+                startedAt: startedAt,
+                watchFolder: watchFolder,
+                organization: organization,
+                trimmedName: trimmedName
+            )
+        } else {
+            try await runMultiple(
+                sources: validated,
+                snapshot: snapshot,
+                startedAt: startedAt,
+                watchFolder: watchFolder,
+                organization: organization,
+                trimmedName: trimmedName
+            )
+        }
+    }
+
+    // MARK: - Single-file path (v0.5.0)
+
+    private func runSingle(
+        source: URL,
+        kind: ManualUploadMediaKind,
+        snapshot: MeetingContextSnapshot,
+        startedAt: Date,
+        watchFolder: URL,
+        organization: Organization?,
+        trimmedName: String
+    ) async throws {
+        // Open the single-file context window the pipeline's
+        // `consumeMeetingContext` (legacy path) reads from.
+        meetingContextStore.recordStarted(
+            meetingName: snapshot.meetingName,
+            organizationId: snapshot.organizationId,
+            organizationName: snapshot.organizationName,
+            meetingSpecificContext: snapshot.meetingSpecificContext,
+            resolvedCompiledContext: snapshot.resolvedCompiledContext,
             at: startedAt
         )
 
-        // 5. If MP4, extract audio to a temp .m4a first. The temp file
-        // lives under FileManager.temporaryDirectory; on success we
-        // stage from it, then drop it. On failure we surface the typed
-        // error and clear the meeting-context window so a later upload
-        // doesn't inherit this attempt's metadata.
-        let stagingSource: URL
+        // Convert MP4 → m4a if needed.
         var tempArtifact: URL?
+        let stagingSource: URL
         switch kind {
         case .audioMP3:
             stagingSource = source
@@ -229,30 +307,19 @@ final class ManualUploadCoordinator {
             Log.manualUpload.info("Extracted audio for \(source.lastPathComponent, privacy: .public)")
         }
 
-        // 6. Acquire short-lived security-scoped access to the Watch
-        // Folder for the copy. `PipelineCoordinator` already holds a
-        // long-lived scope when the pipeline is running, but the
-        // coordinator owns its own scope per upload so the flow works
-        // even if the pipeline is stopped (e.g. user hasn't finished
-        // configuring providers yet).
+        // Stage (clears ledger entry first to defeat the v0.5.0 "re-
+        // upload silently skipped" bug).
         status = .staging(filename: source.lastPathComponent)
         let staged: URL
-        let didStartScope = watchFolder.startAccessingSecurityScopedResource()
-        defer { if didStartScope { watchFolder.stopAccessingSecurityScopedResource() } }
         do {
-            staged = try staging.stage(source: stagingSource, into: watchFolder)
+            staged = try await stageOne(source: stagingSource, into: watchFolder)
         } catch {
-            // Roll back temp artifact + the open snapshot window so the
-            // user can re-try without inheriting the half-state.
             if let tempArtifact { try? FileManager.default.removeItem(at: tempArtifact) }
             meetingContextStore.reset()
             throw error
         }
         if let tempArtifact { try? FileManager.default.removeItem(at: tempArtifact) }
 
-        // 7. Close the meeting-context window so any *other* file the
-        // watcher detects after this upload doesn't accidentally claim
-        // these inputs.
         meetingContextStore.recordStopped(at: Date())
 
         auditLog.append(.init(
@@ -261,6 +328,137 @@ final class ManualUploadCoordinator {
             message: "Manual upload: staged into Watch Folder — '\(trimmedName)'\(organization.map { " · \($0.name)" } ?? "")"
         ))
         Log.manualUpload.info("Staged → \(staged.lastPathComponent, privacy: .public)")
+    }
+
+    // MARK: - Multi-file path (v0.5.1)
+
+    private func runMultiple(
+        sources: [(url: URL, kind: ManualUploadMediaKind)],
+        snapshot: MeetingContextSnapshot,
+        startedAt: Date,
+        watchFolder: URL,
+        organization: Organization?,
+        trimmedName: String
+    ) async throws {
+        guard let accumulator = batchAccumulator else {
+            // Without a batch accumulator we can't combine the parts
+            // into one meeting. Refuse rather than silently producing
+            // N independent meetings, which would surprise the user
+            // who explicitly multi-selected.
+            throw ManualUploadError.stagingFailed(
+                "Multi-file upload requires the batch accumulator to be wired (this build doesn't have one)."
+            )
+        }
+
+        // Open the batch session before any file lands in the Watch
+        // Folder. The accumulator's window starts at `startedAt` and
+        // closes when we call `noteRecordingStopped` after the last
+        // stage — every staged file's creationDate is bumped to "now"
+        // inside `stageOne`, so they all fall inside the window and
+        // get buffered together.
+        await accumulator.noteRecordingStarted(snapshot: snapshot, at: startedAt)
+
+        var stagedURLs: [URL] = []
+        var tempArtifacts: [URL] = []
+
+        do {
+            for entry in sources {
+                let stagingSource: URL
+                switch entry.kind {
+                case .audioMP3:
+                    stagingSource = entry.url
+                case .videoMP4:
+                    status = .converting(filename: entry.url.lastPathComponent)
+                    let tempURL = tempOutputURL(for: entry.url, ext: "m4a")
+                    try await conversion.extractAudio(from: entry.url, to: tempURL)
+                    tempArtifacts.append(tempURL)
+                    stagingSource = tempURL
+                    auditLog.append(.init(
+                        kind: .info,
+                        sourcePath: entry.url.path(percentEncoded: false),
+                        message: "Manual upload: extracted audio from \(entry.url.lastPathComponent)"
+                    ))
+                }
+
+                status = .staging(filename: entry.url.lastPathComponent)
+                let staged = try await stageOne(source: stagingSource, into: watchFolder)
+                stagedURLs.append(staged)
+            }
+        } catch {
+            // On partial failure: undo what we staged + reset
+            // accumulator session so the user can retry cleanly.
+            for staged in stagedURLs {
+                try? FileManager.default.removeItem(at: staged)
+            }
+            for temp in tempArtifacts {
+                try? FileManager.default.removeItem(at: temp)
+            }
+            await accumulator.noteRecordingStopped(at: Date())
+            // The accumulator's `flushNow` will be triggered by the
+            // settle timer with zero parts (we just removed them), so
+            // it'll no-op cleanly. We don't directly call `stop()` —
+            // the accumulator is shared with the pipeline.
+            throw error
+        }
+
+        // Clean up MP4 conversion temps now that all stagings are done.
+        for temp in tempArtifacts {
+            try? FileManager.default.removeItem(at: temp)
+        }
+
+        // Close the batch window. The accumulator will buffer everything
+        // it ingested between `noteRecordingStarted` and now, then flush
+        // as a `.batch` after the settle delay.
+        await accumulator.noteRecordingStopped(at: Date())
+
+        auditLog.append(.init(
+            kind: .info,
+            sourcePath: stagedURLs.first?.path(percentEncoded: false) ?? "ManualUpload",
+            message: "Manual upload: staged \(stagedURLs.count) parts into Watch Folder — '\(trimmedName)'\(organization.map { " · \($0.name)" } ?? "")"
+        ))
+        Log.manualUpload.info("Staged \(stagedURLs.count, privacy: .public) parts → batch path")
+    }
+
+    // MARK: - Staging helper
+
+    /// Stage one source file, doing the ledger cleanup + post-copy
+    /// creationDate bump that both paths share.
+    ///
+    /// - Clears any stale `ProcessedFilesLedger` entry for the target
+    ///   path so a previous failed attempt doesn't cause the watcher
+    ///   to silently skip the new copy (the v0.5.0 re-upload bug).
+    /// - After copying, overwrites the destination's `creationDate` to
+    ///   `now`. Without this, `FileManager.copyItem` preserves the
+    ///   source's attributes — including a creation date that may be
+    ///   hours/days old — which the `MeetingBatchAccumulator` window
+    ///   check rejects ("not inside our recording window"). Bumping
+    ///   the date keeps every staged file inside whichever session
+    ///   window the caller has open.
+    private func stageOne(source: URL, into watchFolder: URL) async throws -> URL {
+        // Pre-compute the target so we can clear its ledger entry
+        // *before* the watcher sees the file. The staging service's
+        // uniqueURL gives us the same destination it'd pick.
+        let baseName = source.deletingPathExtension().lastPathComponent
+        let ext = source.pathExtension
+        let target = staging.uniqueURL(under: watchFolder, baseName: baseName, ext: ext)
+
+        if let ledger = processedFilesLedger {
+            try? await ledger.forget(target)
+        }
+
+        // The staging service does the actual copy. It re-checks the
+        // target on its own to be safe against a race where the watch
+        // folder filled up between our uniqueURL call and the copy.
+        let staged = try staging.stage(source: source, into: watchFolder)
+
+        // Overwrite creationDate so the accumulator's window check
+        // accepts the file as "part of the recording we just opened."
+        var resourceValues = URLResourceValues()
+        resourceValues.creationDate = Date()
+        var mutable = staged
+        try? mutable.setResourceValues(resourceValues)
+
+        return staged
     }
 
     // MARK: - Helpers

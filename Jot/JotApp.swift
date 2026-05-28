@@ -45,13 +45,21 @@ struct JotApp: App {
         // Audio Hijack's "split at 20 MB" recordings produce one
         // meeting / one Notion page instead of N independent ones.
         let batchAccumulator = MeetingBatchAccumulator()
+        // v0.5.1: shared between FolderWatcher (via PipelineCoordinator)
+        // and ManualUploadCoordinator so the coordinator can clear a
+        // stale failed-attempt entry before staging a re-upload at the
+        // same path. Without sharing, the watcher's in-memory ledger
+        // would still believe the path is processed and silently skip
+        // the new copy.
+        let processedFilesLedger = ProcessedFilesLedger()
         let pipeline = PipelineCoordinator(
             settings: settings,
             auditLog: auditLog,
             menuBar: menuBar,
             meetingContextStore: meetingContextStore,
             batchAccumulator: batchAccumulator,
-            providerStore: providers
+            providerStore: providers,
+            processedFilesLedger: processedFilesLedger
         )
         let audioHijack = AudioHijackPresence()
         let invoker = ShortcutInvoker()
@@ -79,7 +87,9 @@ struct JotApp: App {
             settings: settings,
             auditLog: auditLog,
             organizations: organizations,
-            meetingContextStore: meetingContextStore
+            meetingContextStore: meetingContextStore,
+            batchAccumulator: batchAccumulator,
+            processedFilesLedger: processedFilesLedger
         )
         self._menuBar = State(initialValue: menuBar)
         self._settings = State(initialValue: settings)

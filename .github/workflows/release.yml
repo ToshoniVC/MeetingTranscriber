@@ -1,0 +1,240 @@
+name: Release
+
+# Cuts a release on `git tag vX.Y.Z && git push origin vX.Y.Z`:
+#   1. Builds Jot in Release (ad-hoc signed — the user picked ad-hoc-only in
+#      Phase 9 scoping; Developer ID can be wired later by gating it on a
+#      MACOS_SIGNING_IDENTITY secret being present).
+#   2. Zips Jot.app into Jot-X.Y.Z.zip.
+#   3. Signs the zip with Sparkle's sign_update using SPARKLE_PRIVATE_KEY.
+#   4. Creates a GitHub Release with the zip attached.
+#   5. Regenerates docs/appcast.xml and pushes back to main with [skip ci].
+#
+# Required GitHub Secrets:
+#   - SPARKLE_PRIVATE_KEY    base64-encoded EdDSA private key produced by
+#                            Sparkle's `generate_keys` tool. The matching
+#                            public key lives in Jot/Info.plist's SUPublicEDKey.
+#
+# Required GitHub Pages setup (one-time):
+#   - Repo Settings → Pages → Source = "Deploy from a branch"
+#                            → Branch = main, Folder = /docs
+#   - The URL hardcoded in Info.plist (SUFeedURL) and docs/appcast.xml's
+#     <link> must match what GitHub Pages serves.
+
+on:
+  push:
+    tags: ["v*"]
+
+# Need write access to push the regenerated appcast back to main, and to
+# create the GitHub Release.
+permissions:
+  contents: write
+
+# Refuse parallel releases — if you push two tags in quick succession the
+# second one waits its turn.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # Pinned Sparkle CLI bundle. Bump in lockstep with the package version in
+  # project.yml when upgrading. Hosted as a release artifact on Sparkle's
+  # own repo — that's the same EdDSA-signed bundle the framework ships.
+  SPARKLE_VERSION: "2.6.0"
+
+jobs:
+  release:
+    name: Build, sign, publish
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout (with full history)
+        uses: actions/checkout@v4
+        with:
+          # Need history so `git rev-list --count` produces a monotonic
+          # build number, and so we can push back to main.
+          fetch-depth: 0
+          # Use a PAT or the workflow token to authenticate later push.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Regenerate Jot.xcodeproj
+        run: xcodegen generate
+
+      # Compute the release version. Tag is `vX.Y.Z`; strip the `v`.
+      # CURRENT_PROJECT_VERSION is the build number (CFBundleVersion); using
+      # `git rev-list --count HEAD` keeps it monotonic across releases.
+      - name: Resolve version + build number
+        id: vars
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          BUILD=$(git rev-list --count HEAD)
+          echo "tag=$TAG"            >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION"    >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD"        >> "$GITHUB_OUTPUT"
+          echo "Building $TAG -> v$VERSION (build $BUILD)"
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData/**/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('project.yml') }}
+          restore-keys: |
+            spm-${{ runner.os }}-
+
+      # Download Sparkle's signed CLI bundle. Includes sign_update +
+      # generate_appcast. Verifying the SHA against Sparkle's release page
+      # would be a nice extra step; pinning by version is the baseline.
+      - name: Install Sparkle CLI tools
+        run: |
+          set -euo pipefail
+          curl -fL \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz" \
+            -o sparkle.tar.xz
+          mkdir -p sparkle
+          tar -xJf sparkle.tar.xz -C sparkle
+          ls sparkle/bin
+          echo "$(pwd)/sparkle/bin" >> "$GITHUB_PATH"
+
+      # Build + archive in Release. Ad-hoc signed (no Developer ID).
+      # MARKETING_VERSION and CURRENT_PROJECT_VERSION are passed on the
+      # command line so this run reflects the tag, not whatever's in the
+      # xcconfig (which holds the dev default).
+      - name: Build release archive
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -scheme Jot \
+            -configuration Release \
+            -destination 'generic/platform=macOS' \
+            -archivePath build/Jot.xcarchive \
+            MARKETING_VERSION="${{ steps.vars.outputs.version }}" \
+            CURRENT_PROJECT_VERSION="${{ steps.vars.outputs.build }}" \
+            CODE_SIGN_IDENTITY="-" \
+            | xcpretty
+
+      # Extract the .app from the archive. xcodebuild's normal `-exportArchive`
+      # path wants an ExportOptions.plist; doing it by hand is fewer moving
+      # parts for an ad-hoc-signed build.
+      - name: Export Jot.app
+        run: |
+          set -euo pipefail
+          mkdir -p build/export
+          cp -R "build/Jot.xcarchive/Products/Applications/Jot.app" "build/export/Jot.app"
+          ls -la build/export
+
+      # ditto with --keepParent produces the zip Sparkle expects. Plain `zip`
+      # mangles macOS extended attributes and breaks the bundle.
+      - name: Zip Jot.app
+        id: zip
+        run: |
+          set -euo pipefail
+          ZIP_NAME="Jot-${{ steps.vars.outputs.version }}.zip"
+          ( cd build/export && ditto -c -k --keepParent "Jot.app" "../../${ZIP_NAME}" )
+          ls -la "${ZIP_NAME}"
+          echo "name=${ZIP_NAME}" >> "$GITHUB_OUTPUT"
+
+      # Sign the zip with Sparkle's sign_update. Output goes to a file so
+      # we can read it back into the appcast generator. The private key
+      # lives in repo Secrets — never written to disk in the workspace.
+      - name: Sign update with Sparkle
+        id: sign
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SPARKLE_PRIVATE_KEY:-}" ]; then
+            echo "::error::SPARKLE_PRIVATE_KEY secret is missing. See README → 'Cutting a release'." >&2
+            exit 1
+          fi
+          # sign_update reads the private key via the --ed-key-file flag.
+          # Pipe the secret to a private file path with restricted mode.
+          KEY_FILE="$(mktemp)"
+          chmod 600 "$KEY_FILE"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEY_FILE"
+
+          SIGNATURE=$(sign_update --ed-key-file "$KEY_FILE" "${{ steps.zip.outputs.name }}")
+          rm -f "$KEY_FILE"
+          # `sign_update` prints a string like:
+          #   sparkle:edSignature="..." length="..."
+          echo "signature_attrs=$SIGNATURE" >> "$GITHUB_OUTPUT"
+          echo "Signed update attributes: $SIGNATURE"
+
+      # Create the GitHub Release. Pre-release flag off since this is the
+      # production channel; v0.x.y tags can still be marked pre-release
+      # manually if desired.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.vars.outputs.tag }}" \
+            "${{ steps.zip.outputs.name }}" \
+            --title "Jot ${{ steps.vars.outputs.version }}" \
+            --notes "Jot ${{ steps.vars.outputs.version }} — see CHANGELOG and the README for install instructions."
+
+      # Regenerate docs/appcast.xml. `generate_appcast` reads the public
+      # GitHub releases and the file we just zipped to produce a fresh feed.
+      # We pass it just the *directory containing the zip* — it stays out of
+      # our way and writes appcast.xml next to the zip. We then move it to
+      # docs/.
+      - name: Regenerate appcast
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          KEY_FILE="$(mktemp)"
+          chmod 600 "$KEY_FILE"
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > "$KEY_FILE"
+
+          mkdir -p appcast-build
+          cp "${{ steps.zip.outputs.name }}" appcast-build/
+          # --download-url-prefix tells Sparkle where each release zip lives.
+          # We're hosting on GitHub Releases, so the URL is the GH release
+          # download URL — generate_appcast inserts the filename after the
+          # prefix.
+          generate_appcast \
+            --ed-key-file "$KEY_FILE" \
+            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${{ steps.vars.outputs.tag }}/" \
+            appcast-build/
+          rm -f "$KEY_FILE"
+
+          # Move the regenerated feed into place. .nojekyll already exists
+          # in docs/ to keep GitHub Pages from running Jekyll on the XML.
+          mv appcast-build/appcast.xml docs/appcast.xml
+          cat docs/appcast.xml
+
+      - name: Commit + push appcast to main
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git pull --ff-only origin main
+          # If the file didn't actually change, skip the commit instead of
+          # creating an empty one.
+          if git diff --quiet docs/appcast.xml; then
+            echo "No changes to docs/appcast.xml — skipping commit."
+            exit 0
+          fi
+          git add docs/appcast.xml
+          git commit -m "Update appcast for ${{ steps.vars.outputs.tag }} [skip ci]"
+          git push origin main
+
+      - name: Upload archive for debugging on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-debug-${{ steps.vars.outputs.tag }}
+          path: |
+            build/
+            ${{ steps.zip.outputs.name }}
+          retention-days: 14

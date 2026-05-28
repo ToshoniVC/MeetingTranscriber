@@ -1,0 +1,78 @@
+name: Tests
+
+# Runs the unit + integration test suite on every push and PR. Make this a
+# required check in repo settings → Branches → Branch protection on `main`
+# so reds can't merge.
+
+on:
+  push:
+    branches: ["**"]
+    # Skip CI on the [skip ci] commit release.yml pushes back to main after
+    # regenerating docs/appcast.xml — otherwise tagging produces a churn loop.
+  pull_request:
+    branches: [main]
+
+# Concurrency: cancel an in-flight run if the same branch gets a new push.
+# Keeps minutes reasonable when you're iterating on a feature branch.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: xcodebuild test (macOS)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pin the Xcode version. Bump in lockstep with the local minimum so
+      # CI catches API surface bumps before you notice them in Xcode.
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.app
+
+      # XcodeGen owns the project file (project.yml is the source of truth).
+      # Regenerate before building so a missed regen on a feature branch
+      # surfaces as a test failure, not a silent mismatch.
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Regenerate Jot.xcodeproj
+        run: xcodegen generate
+
+      # The shared scheme runs the Jot Dev target + JotTests in Debug.
+      # `-destination 'platform=macOS'` is the standard macOS unit-test
+      # destination. Sparkle is fetched as a Swift Package on first run —
+      # the cache below speeds repeat runs.
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Developer/Xcode/DerivedData/**/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('project.yml') }}
+          restore-keys: |
+            spm-${{ runner.os }}-
+
+      - name: Run tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -scheme Jot \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            | tee xcodebuild.log | xcpretty || (cat xcodebuild.log && exit 1)
+        env:
+          # Avoid Apple's "this Xcode supports Swift X" interactive prompt
+          # by accepting non-interactively.
+          NSUnbufferedIO: YES
+
+      # Surface the raw log on failure for debugging without needing to
+      # rerun the job with SSH access.
+      - name: Upload xcodebuild.log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
+          retention-days: 7

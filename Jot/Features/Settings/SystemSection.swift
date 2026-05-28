@@ -8,6 +8,7 @@ import AppKit
 struct SystemSection: View {
     @Environment(AppSettings.self) private var settings
     @Environment(LoginItemController.self) private var loginItem
+    @Environment(SparkleUpdater.self) private var updater
 
     var body: some View {
         @Bindable var bindable = settings
@@ -34,6 +35,23 @@ struct SystemSection: View {
                 loginItem.apply(enabled: newValue)
             }
 
+            // Manual update check. The Sparkle controller also auto-checks
+            // on launch and every 24h per Info.plist; this is the explicit
+            // affordance from the implementation plan §8.6. Debug builds
+            // get a stub updater whose canCheckForUpdates is always false,
+            // so the button stays disabled in `Jot Dev`.
+            HStack {
+                Button {
+                    updater.checkForUpdates()
+                } label: {
+                    Label("Check for Updates…", systemImage: "arrow.down.circle")
+                }
+                .disabled(!updater.canCheckForUpdates)
+                Text(updateButtonHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             HStack {
                 Button(role: .destructive) {
                     NSApplication.shared.terminate(nil)
@@ -45,5 +63,15 @@ struct SystemSection: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var updateButtonHint: String {
+        #if DEBUG
+        return "Disabled in Jot Dev — ⌘R from Xcode to update the dev build."
+        #else
+        return updater.canCheckForUpdates
+            ? "Jot also auto-checks on launch and every 24 hours."
+            : "Checking…"
+        #endif
     }
 }

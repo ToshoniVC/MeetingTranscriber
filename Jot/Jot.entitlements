@@ -39,5 +39,31 @@
     <true/>
     <key>com.apple.security.files.bookmarks.app-scope</key>
     <true/>
+
+    <!--
+        Sparkle 2.x sandboxing (Phase 9 follow-up).
+
+        With App Sandbox enabled and SUEnableInstallerLauncherService=YES,
+        Sparkle's Installer.xpc publishes two mach services that the main
+        Jot process needs to look up to receive status + progress callbacks
+        from the install:
+
+          $(PRODUCT_BUNDLE_IDENTIFIER)-spks   (Status)
+          $(PRODUCT_BUNDLE_IDENTIFIER)-spkp   (Progress)
+
+        Without the entries below the sandbox blocks both lookups; the
+        installer eventually times out with "installation data was never
+        received" and the user sees the generic
+        "An error occurred while running the updater" message in the
+        Sparkle dialog. Confirmed via Console.app during a v0.1.0 → v0.1.1
+        attempt.
+
+        Reference: https://sparkle-project.org/documentation/sandboxing/
+    -->
+    <key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+    <array>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER)-spks</string>
+        <string>$(PRODUCT_BUNDLE_IDENTIFIER)-spkp</string>
+    </array>
 </dict>
 </plist>

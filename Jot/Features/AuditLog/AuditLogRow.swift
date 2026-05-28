@@ -40,6 +40,12 @@ struct AuditLogRow: View {
                     Text("• \(entry.timestamp, format: .relative(presentation: .named))")
                         .foregroundStyle(.secondary)
                         .font(.caption)
+
+                    if let contextDescription {
+                        Text("• \(contextDescription)")
+                            .foregroundStyle(.secondary)
+                            .font(.caption)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -57,6 +63,20 @@ struct AuditLogRow: View {
             }
         }
         .padding(.vertical, 6)
+    }
+
+    /// Compact "Context: yes (Acme)" / "Context: no" suffix for pipeline
+    /// rows. Returns nil on info rows or on legacy v1 entries that pre-date
+    /// the Add Context feature.
+    private var contextDescription: String? {
+        guard let attached = entry.contextAttached else { return nil }
+        if attached {
+            if let org = entry.organizationName, !org.isEmpty {
+                return "Context: yes (\(org))"
+            }
+            return "Context: yes"
+        }
+        return "Context: no"
     }
 
     private var kindSystemImage: String {

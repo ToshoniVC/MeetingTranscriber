@@ -66,6 +66,7 @@ struct FileOrganizer: Sendable {
     func organize(
         audio sourceURL: URL,
         transcript: String,
+        context: String? = nil,
         outputRoot: URL
     ) async throws -> URL {
         // 1. Validate inputs.
@@ -90,7 +91,7 @@ struct FileOrganizer: Sendable {
             throw FileOrganizerError.outputFolderUnreachable(meetingFolder)
         }
 
-        // 4. Write the transcript next to where the audio will land.
+        // 4a. Write the transcript next to where the audio will land.
         let transcriptURL = meetingFolder.appendingPathComponent("\(baseName).txt")
         do {
             try transcript.write(to: transcriptURL, atomically: true, encoding: .utf8)
@@ -101,14 +102,34 @@ struct FileOrganizer: Sendable {
             throw FileOrganizerError.writeTranscriptFailed(error.localizedDescription)
         }
 
+        // 4b. Optionally write context.md alongside the transcript — the
+        // exact compiled prompt that was sent to Whisper, for
+        // reproducibility (PRD §8). Best-effort: a failed context write
+        // doesn't roll back the transcript, since the transcript itself
+        // is still valuable on its own.
+        let contextURL = meetingFolder.appendingPathComponent("context.md")
+        var contextWritten = false
+        if let context, !context.isEmpty {
+            let body = "# Transcription context\n\nSent with the audio to the transcription endpoint. Kept here for reproducibility.\n\n```\n\(context)\n```\n"
+            do {
+                try body.write(to: contextURL, atomically: true, encoding: .utf8)
+                contextWritten = true
+            } catch {
+                Log.pipeline.warning("Couldn't write context.md: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+
         // 5. Move the audio into the meeting folder.
         let destinationAudioURL = meetingFolder.appendingPathComponent(sourceURL.lastPathComponent)
         do {
             try fileManager.moveItem(at: sourceURL, to: destinationAudioURL)
         } catch {
-            // Roll back the transcript and the folder. The audio stays
-            // wherever it was, so a retry can pick it up.
+            // Roll back the transcript, context.md (if any), and the folder.
+            // The audio stays wherever it was so a retry can pick it up.
             try? fileManager.removeItem(at: transcriptURL)
+            if contextWritten {
+                try? fileManager.removeItem(at: contextURL)
+            }
             try? fileManager.removeItem(at: meetingFolder)
             throw FileOrganizerError.moveAudioFailed(error.localizedDescription)
         }

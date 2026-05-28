@@ -158,10 +158,13 @@ actor ProcessingPipeline {
                 prompt: prompt
             )
 
-            // 2. Organize: per-meeting folder + transcript + move audio.
+            // 2. Organize: per-meeting folder + transcript + (optional)
+            // context.md + move audio. Prompt is the same string that just
+            // went to the API — kept on disk for reproducibility (PRD §8).
             let meetingFolder = try await fileOrganizer.organize(
                 audio: workingURL,
                 transcript: transcript,
+                context: prompt,
                 outputRoot: config.outputFolder
             )
 
@@ -180,19 +183,21 @@ actor ProcessingPipeline {
                 sourcePath: workingURL.path(percentEncoded: false),
                 message: "Transcribed and filed → \(meetingFolder.lastPathComponent)",
                 durationMs: ms,
-                retryable: false
+                retryable: false,
+                contextAttached: prompt != nil,
+                organizationName: snapshot?.organizationName
             ))
             onStateChange(.idle)
 
         } catch let error as TranscriptionError {
-            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime)
+            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
         } catch let error as FileOrganizerError {
-            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime)
+            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
         } catch is CancellationError {
             // Shutdown happened mid-flight — don't log as failure.
             return
         } catch {
-            recordFailure(url: workingURL, message: error.localizedDescription, startedAt: startTime)
+            recordFailure(url: workingURL, message: error.localizedDescription, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
         }
     }
 
@@ -274,14 +279,22 @@ actor ProcessingPipeline {
         return parent.appendingPathComponent("\(baseName)-\(UUID().uuidString.prefix(8))\(extSuffix)")
     }
 
-    private func recordFailure(url: URL, message: String, startedAt: Date) {
+    private func recordFailure(
+        url: URL,
+        message: String,
+        startedAt: Date,
+        snapshot: MeetingContextSnapshot? = nil,
+        promptIncluded: Bool = false
+    ) {
         let ms = Int(Date().timeIntervalSince(startedAt) * 1000)
         onAuditEntry(.init(
             kind: .failure,
             sourcePath: url.path(percentEncoded: false),
             message: message,
             durationMs: ms,
-            retryable: true
+            retryable: true,
+            contextAttached: promptIncluded,
+            organizationName: snapshot?.organizationName
         ))
         // PRD §4.3: failed files must stay in the Watch Folder. We don't
         // touch the source on failure — `FileOrganizer` only moves on

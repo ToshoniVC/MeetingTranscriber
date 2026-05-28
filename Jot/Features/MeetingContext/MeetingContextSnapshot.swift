@@ -14,6 +14,11 @@ struct MeetingContextSnapshot: Codable, Equatable, Sendable {
     /// is a UI affordance, not a stored record (see plan Phase B.3).
     var organizationId: UUID?
 
+    /// Org name captured at the time of `recordStarted` / `update`. Lets the
+    /// pipeline + audit log report the org without holding a back-reference
+    /// to `OrganizationStore`, and survives the org being renamed mid-flight.
+    var organizationName: String?
+
     /// Free-text the user typed in the meeting-start prompt or the
     /// in-recording editor. Trimmed when set; `nil` if empty.
     var meetingSpecificContext: String?
@@ -32,6 +37,7 @@ struct MeetingContextSnapshot: Codable, Equatable, Sendable {
     init(
         meetingName: String,
         organizationId: UUID? = nil,
+        organizationName: String? = nil,
         meetingSpecificContext: String? = nil,
         resolvedCompiledContext: String = "",
         lastEditedAt: Date = Date(),
@@ -39,6 +45,7 @@ struct MeetingContextSnapshot: Codable, Equatable, Sendable {
     ) {
         self.meetingName = meetingName
         self.organizationId = organizationId
+        self.organizationName = organizationName
         self.meetingSpecificContext = meetingSpecificContext
         self.resolvedCompiledContext = resolvedCompiledContext
         self.lastEditedAt = lastEditedAt

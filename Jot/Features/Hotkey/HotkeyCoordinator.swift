@@ -286,6 +286,7 @@ final class HotkeyCoordinator {
             meetingContextStore.recordStarted(
                 meetingName: inputs.meetingName,
                 organizationId: inputs.organizationId,
+                organizationName: org?.name,
                 meetingSpecificContext: inputs.meetingSpecificContext,
                 resolvedCompiledContext: compiled
             )

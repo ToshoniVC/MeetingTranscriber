@@ -131,6 +131,7 @@ struct CurrentMeetingEditorView: View {
         contextStore.update(
             meetingName: effectiveName,
             organizationId: .some(effectiveOrgID),
+            organizationName: .some(org?.name),
             meetingSpecificContext: .some(effectiveContext.isEmpty ? nil : effectiveContext),
             resolvedCompiledContext: compiled
         )

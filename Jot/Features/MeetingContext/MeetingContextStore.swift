@@ -40,6 +40,7 @@ final class MeetingContextStore {
     func recordStarted(
         meetingName: String,
         organizationId: UUID? = nil,
+        organizationName: String? = nil,
         meetingSpecificContext: String? = nil,
         resolvedCompiledContext: String = "",
         at date: Date = Date()
@@ -54,6 +55,7 @@ final class MeetingContextStore {
         let snapshot = MeetingContextSnapshot(
             meetingName: trimmedName,
             organizationId: organizationId,
+            organizationName: organizationName,
             meetingSpecificContext: trimmedContext?.isEmpty == false ? trimmedContext : nil,
             resolvedCompiledContext: resolvedCompiledContext,
             lastEditedAt: date
@@ -75,6 +77,7 @@ final class MeetingContextStore {
     func update(
         meetingName: String? = nil,
         organizationId: UUID?? = nil,
+        organizationName: String?? = nil,
         meetingSpecificContext: String?? = nil,
         resolvedCompiledContext: String? = nil,
         at date: Date = Date()
@@ -85,6 +88,9 @@ final class MeetingContextStore {
         }
         if let organizationId {
             current.snapshot.organizationId = organizationId
+        }
+        if let organizationName {
+            current.snapshot.organizationName = organizationName
         }
         if let meetingSpecificContext {
             let trimmed = meetingSpecificContext?.trimmingCharacters(in: .whitespacesAndNewlines)

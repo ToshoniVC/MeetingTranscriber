@@ -12,12 +12,12 @@ struct MainTabTests {
 
     @Test
     func allCases_isInExpectedOrder() {
-        #expect(MainTab.allCases == [.transcripts, .auditLog, .settings])
+        #expect(MainTab.allCases == [.transcripts, .auditLog, .settings, .context])
     }
 
     @Test
-    func allCases_countIsThree() {
-        #expect(MainTab.allCases.count == 3)
+    func allCases_countIsFour() {
+        #expect(MainTab.allCases.count == 4)
     }
 
     @Test
@@ -36,6 +36,7 @@ struct MainTabTests {
         #expect(MainTab.transcripts.title == "Transcripts")
         #expect(MainTab.auditLog.title == "Audit Log")
         #expect(MainTab.settings.title == "Settings")
+        #expect(MainTab.context.title == "Context")
     }
 
     @Test

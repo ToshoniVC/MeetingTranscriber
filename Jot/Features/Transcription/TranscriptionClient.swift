@@ -42,15 +42,20 @@ actor TranscriptionClient {
         audio: URL,
         baseURL: URL,
         model: String,
-        apiKey: String
+        apiKey: String,
+        prompt: String? = nil
     ) async throws -> String {
         try validate(audio: audio, baseURL: baseURL, model: model, apiKey: apiKey)
 
         do {
-            return try await performTranscription(audio: audio, baseURL: baseURL, model: model, apiKey: apiKey)
+            return try await performTranscription(
+                audio: audio, baseURL: baseURL, model: model, apiKey: apiKey, prompt: prompt
+            )
         } catch let error as TranscriptionError where TranscriptionErrorMapper.isRetryable(error) {
             Log.transcription.warning("Transcription transient failure, retrying once: \(error.userFacingMessage, privacy: .public)")
-            return try await performTranscription(audio: audio, baseURL: baseURL, model: model, apiKey: apiKey)
+            return try await performTranscription(
+                audio: audio, baseURL: baseURL, model: model, apiKey: apiKey, prompt: prompt
+            )
         }
     }
 
@@ -78,13 +83,15 @@ actor TranscriptionClient {
         audio: URL,
         baseURL: URL,
         model: String,
-        apiKey: String
+        apiKey: String,
+        prompt: String?
     ) async throws -> String {
         let request = try TranscriptionRequest(
             audio: audio,
             baseURL: baseURL,
             model: model,
-            apiKey: apiKey
+            apiKey: apiKey,
+            prompt: prompt
         )
         defer {
             // Clean up the on-disk multipart body whether the request

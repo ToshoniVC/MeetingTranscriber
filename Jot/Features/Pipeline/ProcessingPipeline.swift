@@ -48,12 +48,15 @@ actor ProcessingPipeline {
     private let onStateChange: @Sendable (PipelineState) -> Void
     private let onAuditEntry: @Sendable (AuditLogEntry) -> Void
 
-    /// Optional bridge to `MeetingNameStore`. Given a file's creation date,
-    /// returns the meeting name the user typed when this recording started
-    /// — but only if that creation date is plausibly inside Jot's recording
-    /// window (see `MeetingNameStore` for the time-window check). Nil for
-    /// tests / harnesses that don't care about renaming.
-    private let consumeMeetingName: (@Sendable (Date) async -> String?)?
+    /// Optional bridge to `MeetingContextStore`. Given a file's creation
+    /// date, returns the full snapshot for the recording Jot kicked off —
+    /// but only if that creation date is plausibly inside Jot's recording
+    /// window (see `MeetingContextStore` for the time-window check). Nil
+    /// for tests / harnesses that don't care about renaming or context.
+    ///
+    /// Phase D uses only `snapshot.meetingName` (for rename); Phase F adds
+    /// the prompt-compile + send step using the same snapshot.
+    private let consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)?
 
     private var running = false
     private var consumerTask: Task<Void, Never>?
@@ -65,7 +68,7 @@ actor ProcessingPipeline {
         fileOrganizer: FileOrganizer = FileOrganizer(),
         onStateChange: @escaping @Sendable (PipelineState) -> Void,
         onAuditEntry: @escaping @Sendable (AuditLogEntry) -> Void,
-        consumeMeetingName: (@Sendable (Date) async -> String?)? = nil
+        consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)? = nil
     ) {
         self.config = config
         self.watcher = watcher
@@ -73,7 +76,7 @@ actor ProcessingPipeline {
         self.fileOrganizer = fileOrganizer
         self.onStateChange = onStateChange
         self.onAuditEntry = onAuditEntry
-        self.consumeMeetingName = consumeMeetingName
+        self.consumeMeetingContext = consumeMeetingContext
     }
 
     // MARK: - Lifecycle
@@ -125,14 +128,25 @@ actor ProcessingPipeline {
         let startTime = Date()
         onStateChange(.processing(url))
 
-        // 0. If this file's creation date falls inside an active Jot-driven
-        // recording window, rename it to the meeting name the user typed.
-        // The watcher hands us timestamp-named files from AH regardless of
-        // who started the session — the time-window guard in
-        // `MeetingNameStore` ensures we only rename files we know are ours.
+        // 0a. If this file's creation date falls inside an active Jot-driven
+        // recording window, pull the snapshot we'll use for both renaming
+        // and the Whisper `prompt` field. The time-window guard inside
+        // `MeetingContextStore.consume` ensures we only claim a snapshot
+        // for files we know came from a Jot-kicked session.
+        let snapshot = await consumeSnapshotForFile(at: url)
+
+        // 0b. Rename to the user-typed meeting name when one is available.
         // Best-effort: a failed rename falls back to the original URL so
         // transcription still happens.
-        let workingURL = await renameIfMeetingNamePending(url) ?? url
+        let workingURL = await renameIfNeeded(url, with: snapshot) ?? url
+
+        // 0c. Pull the compiled prompt off the snapshot. Empty string and
+        // nil collapse to nil — the transcription client omits the field
+        // entirely in that case, matching pre-Add-Context behaviour.
+        let prompt = snapshot
+            .map(\.resolvedCompiledContext)
+            .flatMap { $0.isEmpty ? nil : $0 }
+        Log.pipeline.info("Prompt attached: \(prompt != nil ? "yes" : "no", privacy: .public)")
 
         do {
             // 1. Transcribe.
@@ -140,13 +154,17 @@ actor ProcessingPipeline {
                 audio: workingURL,
                 baseURL: config.apiBaseURL,
                 model: config.model,
-                apiKey: config.apiKey
+                apiKey: config.apiKey,
+                prompt: prompt
             )
 
-            // 2. Organize: per-meeting folder + transcript + move audio.
+            // 2. Organize: per-meeting folder + transcript + (optional)
+            // context.md + move audio. Prompt is the same string that just
+            // went to the API — kept on disk for reproducibility (PRD §8).
             let meetingFolder = try await fileOrganizer.organize(
                 audio: workingURL,
                 transcript: transcript,
+                context: prompt,
                 outputRoot: config.outputFolder
             )
 
@@ -165,32 +183,42 @@ actor ProcessingPipeline {
                 sourcePath: workingURL.path(percentEncoded: false),
                 message: "Transcribed and filed → \(meetingFolder.lastPathComponent)",
                 durationMs: ms,
-                retryable: false
+                retryable: false,
+                contextAttached: prompt != nil,
+                organizationName: snapshot?.organizationName
             ))
             onStateChange(.idle)
 
         } catch let error as TranscriptionError {
-            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime)
+            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
         } catch let error as FileOrganizerError {
-            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime)
+            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
         } catch is CancellationError {
             // Shutdown happened mid-flight — don't log as failure.
             return
         } catch {
-            recordFailure(url: workingURL, message: error.localizedDescription, startedAt: startTime)
+            recordFailure(url: workingURL, message: error.localizedDescription, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
         }
     }
 
-    /// Try to rename `url` to the meeting name the user typed at the start
-    /// prompt. Returns the new URL on success, or nil if no rename happened
-    /// (no pending meeting, creation date outside the window, sanitized name
-    /// empty, or the actual `moveItem` failed). Never throws — rename is
-    /// strictly best-effort and must not block transcription.
-    private func renameIfMeetingNamePending(_ url: URL) async -> URL? {
-        guard let consume = consumeMeetingName else { return nil }
+    /// Ask `consumeMeetingContext` for a snapshot matching `url`'s creation
+    /// date. Returns nil if no callback is wired, no creation date is
+    /// readable, or no snapshot matches (file came from outside a
+    /// Jot-driven session). Side effect: a successful consume clears the
+    /// store's pending entry — we can only spend it once.
+    private func consumeSnapshotForFile(at url: URL) async -> MeetingContextSnapshot? {
+        guard let consume = consumeMeetingContext else { return nil }
         guard let creationDate = fileCreationDate(of: url) else { return nil }
-        guard let rawName = await consume(creationDate) else { return nil }
-        guard let safeName = MeetingNameStore.sanitizedFilenameComponent(rawName) else { return nil }
+        return await consume(creationDate)
+    }
+
+    /// Try to rename `url` to the snapshot's meeting name. Returns the new
+    /// URL on success, or nil if no rename happened (no snapshot, sanitized
+    /// name empty, or the actual `moveItem` failed). Never throws — rename
+    /// is strictly best-effort and must not block transcription.
+    private func renameIfNeeded(_ url: URL, with snapshot: MeetingContextSnapshot?) async -> URL? {
+        guard let snapshot else { return nil }
+        guard let safeName = MeetingContextStore.sanitizedFilenameComponent(snapshot.meetingName) else { return nil }
 
         let parent = url.deletingLastPathComponent()
         let ext = url.pathExtension
@@ -226,7 +254,7 @@ actor ProcessingPipeline {
 
     /// Inode creation timestamp via `URLResourceValues`. Approximates when
     /// Audio Hijack opened the file for writing — i.e., when recording
-    /// began — which is exactly what `MeetingNameStore` wants to compare
+    /// began — which is exactly what `MeetingContextStore` wants to compare
     /// against its `startedAt`.
     private func fileCreationDate(of url: URL) -> Date? {
         let values = try? url.resourceValues(forKeys: [.creationDateKey])
@@ -251,14 +279,22 @@ actor ProcessingPipeline {
         return parent.appendingPathComponent("\(baseName)-\(UUID().uuidString.prefix(8))\(extSuffix)")
     }
 
-    private func recordFailure(url: URL, message: String, startedAt: Date) {
+    private func recordFailure(
+        url: URL,
+        message: String,
+        startedAt: Date,
+        snapshot: MeetingContextSnapshot? = nil,
+        promptIncluded: Bool = false
+    ) {
         let ms = Int(Date().timeIntervalSince(startedAt) * 1000)
         onAuditEntry(.init(
             kind: .failure,
             sourcePath: url.path(percentEncoded: false),
             message: message,
             durationMs: ms,
-            retryable: true
+            retryable: true,
+            contextAttached: promptIncluded,
+            organizationName: snapshot?.organizationName
         ))
         // PRD §4.3: failed files must stay in the Watch Folder. We don't
         // touch the source on failure — `FileOrganizer` only moves on

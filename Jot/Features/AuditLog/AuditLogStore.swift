@@ -69,7 +69,9 @@ final class AuditLogStore {
             sourcePath: original.sourcePath,
             message: original.message,
             durationMs: original.durationMs,
-            retryable: false
+            retryable: false,
+            contextAttached: original.contextAttached,
+            organizationName: original.organizationName
         )
         persist()
     }

@@ -5,6 +5,43 @@ Versions are tagged from `main` (`v0.1.0`, `v0.1.1`, …) and built/signed by
 release notes from the `<description>` element in `docs/appcast.xml`, not
 this file — this is the long-form humans-only log.
 
+## v0.2.0 — Context
+
+First feature beyond the foundation app: per-organization profiles plus
+per-meeting context that flow into the Whisper transcription request as
+the `prompt` parameter (up to 224 tokens; we budget 800 chars by
+default) and into the output folder as a `context.md` artifact for
+reproducibility.
+
+What's new:
+
+- **New "Context" tab** (4th sidebar item) for CRUD on organization
+  profiles: name, company, staff, projects, glossary, acronyms,
+  freeform notes, default-for-new-meetings toggle.
+- **Meeting-start prompt** now asks for name + organization + optional
+  meeting-specific context. Default org pre-selected; "No Organization"
+  remains a first-class choice for private calls.
+- **Edit current meeting…** entry in the menu-bar dropdown opens a
+  floating editor while a recording is active; edits apply to the
+  compiled prompt the pipeline will send.
+- **Pipeline** compiles a deterministic prompt per PRD §6 (system
+  prefix → org identity → staff → projects → glossary/acronyms → org
+  notes → meeting name → meeting-specific context), trimming and
+  deduping case-insensitively within each list, with the lowest-
+  priority sections dropped first under budget pressure.
+- **Output folder** gets a `context.md` next to the transcript when a
+  prompt was sent — the exact compiled string, wrapped in a fenced
+  block. Failed file-move rolls back the transcript and `context.md`
+  together.
+- **Audit log** rows surface "Context: yes (Acme)" / "Context: no" and
+  the entry schema is bumped to v2 (`contextAttached`,
+  `organizationName`). Legacy v1 rows on disk decode cleanly.
+
+Backwards-compat: users with zero organizations see the new Context
+tab but no behavior change in their existing transcription flow — the
+prompt field is omitted from the request when there's nothing to send,
+and no `context.md` is written.
+
 ## v0.1.7 — Bootstrap at process launch
 
 Fixes the menu-bar icon sitting at "Not yet configured" after Login-Item

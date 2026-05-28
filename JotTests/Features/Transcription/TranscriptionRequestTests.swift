@@ -194,6 +194,61 @@ struct TranscriptionRequestTests {
         #expect(text.contains("Content-Type: audio/mp4"))
     }
 
+    // MARK: - Prompt field (Phase F)
+
+    @Test
+    func prompt_omitted_whenNil() throws {
+        let audio = Self.makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let request = try TranscriptionRequest(
+            audio: audio, baseURL: Self.baseURL,
+            model: "m", apiKey: "sk",
+            prompt: nil,
+            boundary: "BBOUND"
+        )
+        defer { try? FileManager.default.removeItem(at: request.bodyFileURL) }
+
+        let text = String(data: try Data(contentsOf: request.bodyFileURL), encoding: .utf8) ?? ""
+        #expect(!text.contains("name=\"prompt\""))
+    }
+
+    @Test
+    func prompt_omitted_whenEmpty() throws {
+        let audio = Self.makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let request = try TranscriptionRequest(
+            audio: audio, baseURL: Self.baseURL,
+            model: "m", apiKey: "sk",
+            prompt: "",
+            boundary: "BBOUND"
+        )
+        defer { try? FileManager.default.removeItem(at: request.bodyFileURL) }
+
+        let text = String(data: try Data(contentsOf: request.bodyFileURL), encoding: .utf8) ?? ""
+        #expect(!text.contains("name=\"prompt\""))
+    }
+
+    @Test
+    func prompt_includedAsMultipartField_whenSet() throws {
+        let audio = Self.makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let prompt = "Organization: Acme\nStaff: Alice, Bob"
+        let request = try TranscriptionRequest(
+            audio: audio, baseURL: Self.baseURL,
+            model: "m", apiKey: "sk",
+            prompt: prompt,
+            boundary: "BBOUND"
+        )
+        defer { try? FileManager.default.removeItem(at: request.bodyFileURL) }
+
+        let text = String(data: try Data(contentsOf: request.bodyFileURL), encoding: .utf8) ?? ""
+        #expect(text.contains("Content-Disposition: form-data; name=\"prompt\""))
+        #expect(text.contains(prompt))
+    }
+
     @Test
     func wavFile_getsAudioWavMimeType() throws {
         let audio = FileManager.default.temporaryDirectory

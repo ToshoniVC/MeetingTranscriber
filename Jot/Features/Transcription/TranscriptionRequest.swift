@@ -44,6 +44,7 @@ struct TranscriptionRequest {
         baseURL: URL,
         model: String,
         apiKey: String,
+        prompt: String? = nil,
         timeout: TimeInterval = 300,
         boundary: String = Self.makeBoundary(),
         bodyFileFactory: () -> URL = Self.defaultBodyFile
@@ -55,7 +56,8 @@ struct TranscriptionRequest {
             to: bodyFile,
             boundary: boundary,
             model: model,
-            audio: audio
+            audio: audio,
+            prompt: prompt
         )
 
         var request = URLRequest(url: baseURL)
@@ -81,7 +83,8 @@ struct TranscriptionRequest {
         to bodyFile: URL,
         boundary: String,
         model: String,
-        audio: URL
+        audio: URL,
+        prompt: String?
     ) throws {
         FileManager.default.createFile(atPath: bodyFile.path(percentEncoded: false), contents: nil)
         let handle = try FileHandle(forWritingTo: bodyFile)
@@ -101,6 +104,16 @@ struct TranscriptionRequest {
         try write("--\(boundary)\r\n")
         try write("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n")
         try write("text\r\n")
+
+        // --- prompt field (optional) ---
+        // OpenAI Whisper's documented `prompt` parameter (up to 224 tokens).
+        // Non-supporting endpoints ignore unknown fields, so omission is the
+        // safe default and we never need a capability handshake here.
+        if let prompt, !prompt.isEmpty {
+            try write("--\(boundary)\r\n")
+            try write("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n")
+            try write("\(prompt)\r\n")
+        }
 
         // --- file field (streamed) ---
         let filename = audio.lastPathComponent

@@ -39,6 +39,7 @@ struct MainWindow: View {
             case .transcripts: TranscriptsView()
             case .auditLog:    AuditLogView()
             case .settings:    SettingsView()
+            case .context:     OrganizationsView()
             }
         }
         // Single error-inspector sheet hosted at the window level so it
@@ -102,6 +103,7 @@ enum MainTab: String, CaseIterable, Identifiable {
     case transcripts
     case auditLog
     case settings
+    case context
 
     var id: Self { self }
 
@@ -112,6 +114,7 @@ enum MainTab: String, CaseIterable, Identifiable {
         case .transcripts: return "Transcripts"
         case .auditLog:    return "Audit Log"
         case .settings:    return "Settings"
+        case .context:     return "Context"
         }
     }
 
@@ -121,6 +124,7 @@ enum MainTab: String, CaseIterable, Identifiable {
         case .transcripts: return "doc.text"
         case .auditLog:    return "list.bullet.clipboard"
         case .settings:    return "gearshape"
+        case .context:     return "person.text.rectangle"
         }
     }
 }

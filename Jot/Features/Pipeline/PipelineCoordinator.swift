@@ -22,7 +22,7 @@ final class PipelineCoordinator {
     private let settings: AppSettings
     private let auditLog: AuditLogStore
     private let menuBar: MenuBarController
-    private let meetingNameStore: MeetingNameStore?
+    private let meetingContextStore: MeetingContextStore?
 
     /// Current pipeline (if running). Nil between starts.
     private var pipeline: ProcessingPipeline?
@@ -42,12 +42,12 @@ final class PipelineCoordinator {
         settings: AppSettings,
         auditLog: AuditLogStore,
         menuBar: MenuBarController,
-        meetingNameStore: MeetingNameStore? = nil
+        meetingContextStore: MeetingContextStore? = nil
     ) {
         self.settings = settings
         self.auditLog = auditLog
         self.menuBar = menuBar
-        self.meetingNameStore = meetingNameStore
+        self.meetingContextStore = meetingContextStore
     }
 
     // MARK: - Public API
@@ -140,15 +140,15 @@ final class PipelineCoordinator {
 
         do {
             let watcher = try await FolderWatcher(folderURL: config.watchFolder)
-            let consumeMeetingName: (@Sendable (Date) async -> String?)?
-            if let store = meetingNameStore {
-                consumeMeetingName = { creationDate in
+            let consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)?
+            if let store = meetingContextStore {
+                consumeMeetingContext = { creationDate in
                     await MainActor.run {
                         store.consume(forFileCreatedAt: creationDate)
                     }
                 }
             } else {
-                consumeMeetingName = nil
+                consumeMeetingContext = nil
             }
             let pipeline = ProcessingPipeline(
                 config: config,
@@ -163,7 +163,7 @@ final class PipelineCoordinator {
                         self?.auditLog.append(entry)
                     }
                 },
-                consumeMeetingName: consumeMeetingName
+                consumeMeetingContext: consumeMeetingContext
             )
             try await pipeline.start()
             self.pipeline = pipeline

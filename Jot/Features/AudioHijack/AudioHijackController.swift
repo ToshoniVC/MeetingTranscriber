@@ -36,44 +36,12 @@ enum AudioHijackRecordingError: Error, Equatable {
     }
 }
 
-/// Abstracts the meeting-name prompt so tests can substitute a non-modal
-/// fake. Production calls `NSAlert` on the main actor.
-@MainActor
-protocol MeetingNamePrompting: AnyObject {
-    /// Show the prompt and return the entered name (trimmed). Returns nil
-    /// if the user cancelled.
-    func ask() async -> String?
-}
-
-/// Production prompt: `NSAlert` with an attached `NSTextField`, modal in
-/// front of the app. The app gets activated so the dialog appears on top
-/// of whatever the user is doing.
-@MainActor
-final class SystemMeetingNamePrompter: MeetingNamePrompting {
-    func ask() async -> String? {
-        NSApp.activate(ignoringOtherApps: true)
-
-        let alert = NSAlert()
-        alert.messageText = "Start recording"
-        alert.informativeText = "Meeting name (optional — passed as input to your Start Shortcut, and logged in the Audit Log):"
-        alert.addButton(withTitle: "Start Recording")
-        alert.addButton(withTitle: "Cancel")
-
-        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
-        input.placeholderString = "e.g. Standup, Client Call"
-        alert.accessoryView = input
-        alert.window.initialFirstResponder = input
-
-        let response = alert.runModal()
-        guard response == .alertFirstButtonReturn else { return nil }
-        return input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-}
-
 /// Outcome of `toggleRecording()` — drives UI feedback and the menu-bar
-/// recording indicator.
+/// recording indicator. The `.started` case carries the full
+/// `MeetingStartInputs` so the caller (HotkeyCoordinator) can stamp the
+/// in-flight `MeetingContextStore` snapshot.
 enum RecordingAction: Equatable, Sendable {
-    case started(meetingName: String)
+    case started(inputs: MeetingStartInputs)
     case stopped
 }
 
@@ -107,12 +75,12 @@ enum RecordingAction: Equatable, Sendable {
 @Observable
 final class AudioHijackController {
 
-    private let prompter: any MeetingNamePrompting
+    private let prompter: any MeetingStartPrompting
     private let invoker: ShortcutInvoker
     private let presence: AudioHijackPresence
 
     init(
-        prompter: any MeetingNamePrompting,
+        prompter: any MeetingStartPrompting,
         invoker: ShortcutInvoker,
         presence: AudioHijackPresence
     ) {
@@ -135,7 +103,9 @@ final class AudioHijackController {
     func toggleRecording(
         isCurrentlyRecording: Bool,
         startShortcutName: String,
-        stopShortcutName: String
+        stopShortcutName: String,
+        organizations: [Organization],
+        defaultOrgId: UUID?
     ) async throws -> RecordingAction {
         guard presence.isInstalled else {
             throw AudioHijackRecordingError.audioHijackNotInstalled
@@ -147,16 +117,19 @@ final class AudioHijackController {
             return .stopped
         }
 
-        // Not recording (per caller) → prompt for name + start.
-        guard let meetingName = await prompter.ask() else {
+        // Not recording (per caller) → prompt for name + org + context + start.
+        guard let inputs = await prompter.ask(
+            organizations: organizations,
+            defaultOrgId: defaultOrgId
+        ) else {
             throw AudioHijackRecordingError.userCancelled
         }
         // Pass the name on stdin only if it's non-empty — saves a useless
         // `--input-path -` argument when the user skipped the field.
-        let stdin = meetingName.isEmpty ? nil : meetingName
+        let stdin = inputs.meetingName.isEmpty ? nil : inputs.meetingName
         try await runShortcut(name: startShortcutName, input: stdin)
-        Log.app.info("AudioHijack: start Shortcut ran for '\(meetingName, privacy: .public)'")
-        return .started(meetingName: meetingName)
+        Log.app.info("AudioHijack: start Shortcut ran for '\(inputs.meetingName, privacy: .public)'")
+        return .started(inputs: inputs)
     }
 
     /// Force-stop the current recording (used by the menu-bar "Stop recording"

@@ -1,25 +1,14 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!--
-    Sparkle appcast for Jot. Regenerated automatically by
-    .github/workflows/release.yml on every `v*` tag. Hosted on GitHub Pages
-    from this `docs/` folder so the URL stays stable across releases:
-
-        https://toshonivc.github.io/MeetingTranscriber/appcast.xml
-
-    Empty `<item>` list until the first tagged release. Sparkle treats a
-    feed with no items as "no updates available" — which is the right
-    answer pre-launch.
-
-    To bootstrap GitHub Pages: repo Settings → Pages → Source = "Deploy
-    from a branch" → Branch = `main`, Folder = `/docs` → Save.
--->
-<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
-     xmlns:dc="http://purl.org/dc/elements/1.1/"
-     version="2.0">
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>Jot</title>
-        <link>https://toshonivc.github.io/MeetingTranscriber/appcast.xml</link>
-        <description>Updates for Jot — the macOS meeting transcription menu-bar utility.</description>
-        <language>en</language>
+        <item>
+            <title>0.1.0</title>
+            <pubDate>Thu, 28 May 2026 07:58:14 +0000</pubDate>
+            <sparkle:version>26</sparkle:version>
+            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/ToshoniVC/MeetingTranscriber/releases/download/v0.1.0/Jot-0.1.0.zip" length="1586722" type="application/octet-stream" sparkle:edSignature="Lw7Gv3vICAZ11Zob1tbRPIChpt+znU3JCXLM2zxCKATHTckZvMBpNu2bMEBdKhYn8+mObTSBSOu8HgjZIsgjCg=="/>
+        </item>
     </channel>
 </rss>

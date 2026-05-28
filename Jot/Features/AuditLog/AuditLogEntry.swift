@@ -3,14 +3,16 @@ import Foundation
 /// One row in the Audit Log tab (PRD §3.2 Tab 2). Codable so the
 /// `AuditLogStore` can persist the whole log to disk and survive relaunches.
 ///
+/// **Schema v5** (Multiple Providers feature): adds
+/// `transcriptionProvider`.
 /// **Schema v4** (Claude Code Meeting Notes feature): adds
 /// `claudeCodeStatus`.
 /// **Schema v3** (Create Notion Meeting feature): adds `notionStatus`.
 /// **Schema v2** (Add Context feature): adds `contextAttached` and
-/// `organizationName`. All four new fields are Optional so legacy
-/// entries on disk decode cleanly without a separate migration step.
-/// The hand-rolled `init(from:)` defaults `schemaVersion` to 1 when
-/// absent. New entries always write the current schemaVersion.
+/// `organizationName`. All new fields are Optional so legacy entries
+/// on disk decode cleanly without a separate migration step. The
+/// hand-rolled `init(from:)` defaults `schemaVersion` to 1 when absent.
+/// New entries always write the current schemaVersion.
 struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
     enum Kind: String, Codable, Sendable {
         case info
@@ -51,9 +53,19 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
     /// post-Notion routine fire completes.
     let claudeCodeStatus: ClaudeCodeRoutineStatus?
 
-    /// On-disk schema version. Bumped from 3 → 4 for `claudeCodeStatus`.
-    /// New entries default to the current value; legacy rows decode as
-    /// 1 (pre-Add-Context) when the field is absent.
+    /// Display name of the transcription provider that produced this
+    /// meeting's transcript (e.g., "OpenAI", "Groq"). Multi-provider
+    /// batches that crossed providers via fallback show the chain
+    /// joined with " + " (e.g., "OpenAI + Groq"). `nil` for non-
+    /// pipeline rows, for v1–v4-schema rows decoded from older logs,
+    /// and for pipelines wired to the legacy single-provider path
+    /// (which doesn't know its own provider name). v0.4.5+.
+    let transcriptionProvider: String?
+
+    /// On-disk schema version. Bumped from 4 → 5 for
+    /// `transcriptionProvider`. New entries default to the current
+    /// value; legacy rows decode as 1 (pre-Add-Context) when the field
+    /// is absent.
     let schemaVersion: Int
 
     init(
@@ -68,7 +80,8 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         organizationName: String? = nil,
         notionStatus: NotionStatus? = nil,
         claudeCodeStatus: ClaudeCodeRoutineStatus? = nil,
-        schemaVersion: Int = 4
+        transcriptionProvider: String? = nil,
+        schemaVersion: Int = 5
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -81,6 +94,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         self.organizationName = organizationName
         self.notionStatus = notionStatus
         self.claudeCodeStatus = claudeCodeStatus
+        self.transcriptionProvider = transcriptionProvider
         self.schemaVersion = schemaVersion
     }
 
@@ -100,6 +114,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         self.organizationName = try c.decodeIfPresent(String.self, forKey: .organizationName)
         self.notionStatus = try c.decodeIfPresent(NotionStatus.self, forKey: .notionStatus)
         self.claudeCodeStatus = try c.decodeIfPresent(ClaudeCodeRoutineStatus.self, forKey: .claudeCodeStatus)
+        self.transcriptionProvider = try c.decodeIfPresent(String.self, forKey: .transcriptionProvider)
         self.schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
     }
 
@@ -119,6 +134,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
             organizationName: organizationName,
             notionStatus: status,
             claudeCodeStatus: claudeCodeStatus,
+            transcriptionProvider: transcriptionProvider,
             schemaVersion: schemaVersion
         )
     }
@@ -139,6 +155,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
             organizationName: organizationName,
             notionStatus: notionStatus,
             claudeCodeStatus: status,
+            transcriptionProvider: transcriptionProvider,
             schemaVersion: schemaVersion
         )
     }

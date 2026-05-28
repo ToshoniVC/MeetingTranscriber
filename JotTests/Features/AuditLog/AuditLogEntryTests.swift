@@ -47,20 +47,21 @@ struct AuditLogEntryTests {
         #expect(decoded == entries)
     }
 
-    // MARK: - Schema v4 (Claude Code routine trigger)
+    // MARK: - Schema v5 (transcription provider attribution)
 
     @Test
-    func newEntry_defaultsToSchemaV4() {
+    func newEntry_defaultsToSchemaV5() {
         let entry = AuditLogEntry(kind: .info, sourcePath: "/a", message: "x")
-        #expect(entry.schemaVersion == 4)
+        #expect(entry.schemaVersion == 5)
         #expect(entry.contextAttached == nil)
         #expect(entry.organizationName == nil)
         #expect(entry.notionStatus == nil)
         #expect(entry.claudeCodeStatus == nil)
+        #expect(entry.transcriptionProvider == nil)
     }
 
     @Test
-    func roundTrip_preservesAddContextV2Fields_onV4Entry() throws {
+    func roundTrip_preservesAddContextV2Fields_onV5Entry() throws {
         let original = AuditLogEntry(
             kind: .success,
             sourcePath: "/tmp/x.mp3",
@@ -73,9 +74,23 @@ struct AuditLogEntryTests {
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(AuditLogEntry.self, from: data)
         #expect(decoded == original)
-        #expect(decoded.schemaVersion == 4)
+        #expect(decoded.schemaVersion == 5)
         #expect(decoded.contextAttached == true)
         #expect(decoded.organizationName == "Acme")
+    }
+
+    @Test
+    func roundTrip_preservesTranscriptionProvider() throws {
+        let original = AuditLogEntry(
+            kind: .success,
+            sourcePath: "/tmp/x.mp3",
+            message: "Transcribed via OpenAI → meeting",
+            transcriptionProvider: "OpenAI"
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(AuditLogEntry.self, from: data)
+        #expect(decoded == original)
+        #expect(decoded.transcriptionProvider == "OpenAI")
     }
 
     // MARK: - Schema v4 (claudeCodeStatus)

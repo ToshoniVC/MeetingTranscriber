@@ -13,6 +13,7 @@ struct JotApp: App {
     @State private var settings: AppSettings
     @State private var auditLog: AuditLogStore
     @State private var organizations: OrganizationStore
+    @State private var providers: ProviderStore
     @State private var meetingContextStore: MeetingContextStore
     @State private var pipeline: PipelineCoordinator
     @State private var hotkey: HotkeyCoordinator
@@ -28,6 +29,10 @@ struct JotApp: App {
         let settings = AppSettings()
         let auditLog = AuditLogStore()
         let organizations = OrganizationStore()
+        // v0.4.5: multiple transcription providers, ordered fallback
+        // chain. The store is the single source of truth; legacy
+        // single-provider migration runs before the pipeline starts.
+        let providers = ProviderStore()
         // Shared between HotkeyCoordinator (stamps started/stopped/edits)
         // and PipelineCoordinator (queries it when a new file lands to
         // pull the meeting name + compiled context).
@@ -44,7 +49,8 @@ struct JotApp: App {
             auditLog: auditLog,
             menuBar: menuBar,
             meetingContextStore: meetingContextStore,
-            batchAccumulator: batchAccumulator
+            batchAccumulator: batchAccumulator,
+            providerStore: providers
         )
         let audioHijack = AudioHijackPresence()
         let invoker = ShortcutInvoker()
@@ -72,6 +78,7 @@ struct JotApp: App {
         self._settings = State(initialValue: settings)
         self._auditLog = State(initialValue: auditLog)
         self._organizations = State(initialValue: organizations)
+        self._providers = State(initialValue: providers)
         self._meetingContextStore = State(initialValue: meetingContextStore)
         self._pipeline = State(initialValue: pipeline)
         self._hotkey = State(initialValue: hotkey)
@@ -88,6 +95,15 @@ struct JotApp: App {
         // and the menu-bar icon would sit at .notConfigured until the user
         // manually opened the window.
         Task { @MainActor in
+            // Migrate v0.4.4-and-earlier single-provider settings into
+            // the new `ProviderStore` before the pipeline bootstraps,
+            // so the very first transcription on 0.4.5 uses the
+            // migrated chain. Idempotent — no-op when the store is
+            // already populated.
+            _ = LegacyProviderMigration.migrateIfNeeded(
+                settings: settings,
+                store: providers
+            )
             await pipeline.bootstrap()
             await hotkey.bootstrap()
             if settings.launchOnStartup {
@@ -121,6 +137,7 @@ struct JotApp: App {
                 .environment(settings)
                 .environment(auditLog)
                 .environment(organizations)
+                .environment(providers)
                 .environment(meetingContextStore)
                 .environment(pipeline)
                 .environment(hotkey)

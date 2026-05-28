@@ -133,6 +133,13 @@ actor ProcessingPipeline {
     /// `claudeCodeMode == nil`.
     private let onClaudeCodeStatusChange: (@Sendable (UUID, ClaudeCodeRoutineStatus) -> Void)?
 
+    /// v0.4.5+: when non-nil, the pipeline walks this ordered list of
+    /// providers per transcription via `RotatingTranscriber` and ignores
+    /// `config.apiBaseURL` / `config.model` / `config.apiKey`. Nil
+    /// preserves the legacy single-provider path used by older tests +
+    /// the Settings "Test connection" code path.
+    private let providerSource: RotatingTranscriber.Source?
+
     private var running = false
     private var consumerTask: Task<Void, Never>?
 
@@ -154,7 +161,8 @@ actor ProcessingPipeline {
         notionMode: NotionPipelineMode? = nil,
         onNotionStatusChange: (@Sendable (UUID, NotionStatus) -> Void)? = nil,
         claudeCodeMode: ClaudeCodePipelineMode? = nil,
-        onClaudeCodeStatusChange: (@Sendable (UUID, ClaudeCodeRoutineStatus) -> Void)? = nil
+        onClaudeCodeStatusChange: (@Sendable (UUID, ClaudeCodeRoutineStatus) -> Void)? = nil,
+        providerSource: RotatingTranscriber.Source? = nil
     ) {
         self.config = config
         self.watcher = watcher
@@ -169,6 +177,7 @@ actor ProcessingPipeline {
         self.onNotionStatusChange = onNotionStatusChange
         self.claudeCodeMode = claudeCodeMode
         self.onClaudeCodeStatusChange = onClaudeCodeStatusChange
+        self.providerSource = providerSource
     }
 
     // MARK: - Lifecycle
@@ -257,6 +266,33 @@ actor ProcessingPipeline {
         await process(url: url)
     }
 
+    // MARK: - Transcription dispatch (rotating vs legacy)
+
+    /// Dispatch a transcription. When a `providerSource` is wired this
+    /// walks the configured provider chain via `RotatingTranscriber`
+    /// (v0.4.5+); otherwise it falls back to the single-provider call
+    /// shape backed by the `PipelineConfig` snapshot — preserving the
+    /// pre-0.4.5 behavior used by older test fixtures.
+    private func runTranscription(
+        audio: URL,
+        prompt: String?
+    ) async throws -> TranscriptionResult {
+        if let providerSource {
+            let rotator = RotatingTranscriber(
+                client: transcriptionClient,
+                source: providerSource
+            )
+            return try await rotator.transcribe(audio: audio, prompt: prompt)
+        }
+        return try await transcriptionClient.transcribe(
+            audio: audio,
+            baseURL: config.apiBaseURL,
+            model: config.model,
+            apiKey: config.apiKey,
+            prompt: prompt
+        )
+    }
+
     // MARK: - Per-file processing
 
     private func process(url: URL) async {
@@ -284,12 +320,11 @@ actor ProcessingPipeline {
         Log.pipeline.info("Prompt attached: \(prompt != nil ? "yes" : "no", privacy: .public)")
 
         do {
-            // 1. Transcribe.
-            let result = try await transcriptionClient.transcribe(
+            // 1. Transcribe — via the rotating chain when one's wired,
+            // else the legacy single-provider call backed by the
+            // PipelineConfig snapshot.
+            let result = try await runTranscription(
                 audio: workingURL,
-                baseURL: config.apiBaseURL,
-                model: config.model,
-                apiKey: config.apiKey,
                 prompt: prompt
             )
 
@@ -326,17 +361,22 @@ actor ProcessingPipeline {
             let entryId = UUID()
             let initialStatus = initialNotionStatus()
             let initialClaudeCodeStatus = initialClaudeCodeStatus()
+            let providerLabel = result.providerName.isEmpty ? nil : result.providerName
+            let message = providerLabel.map {
+                "Transcribed via \($0) → \(meetingFolder.lastPathComponent)"
+            } ?? "Transcribed and filed → \(meetingFolder.lastPathComponent)"
             onAuditEntry(.init(
                 id: entryId,
                 kind: .success,
                 sourcePath: workingURL.path(percentEncoded: false),
-                message: "Transcribed and filed → \(meetingFolder.lastPathComponent)",
+                message: message,
                 durationMs: ms,
                 retryable: false,
                 contextAttached: prompt != nil,
                 organizationName: snapshot?.organizationName,
                 notionStatus: initialStatus,
-                claudeCodeStatus: initialClaudeCodeStatus
+                claudeCodeStatus: initialClaudeCodeStatus,
+                transcriptionProvider: providerLabel
             ))
             onStateChange(.idle)
 
@@ -354,8 +394,9 @@ actor ProcessingPipeline {
                 // Send Notion the timestamped rendering so the meeting
                 // page reads like minutes with jump-back anchors, not
                 // one wall of text. Falls back to the plain text when
-                // the endpoint returned no segments.
-                let notionBody = TimestampedTranscriptFormatter.formatBody(for: result)
+                // the endpoint returned no segments. v0.4.5 appends a
+                // footer line attributing the provider when we know it.
+                let notionBody = Self.composeNotionTranscript(for: result)
                 scheduleNotionWrite(
                     entryId: entryId,
                     config: notionConfig,
@@ -368,6 +409,8 @@ actor ProcessingPipeline {
 
         } catch let error as TranscriptionError {
             recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
+        } catch let error as RotatingTranscriber.RotationError {
+            recordFailure(url: workingURL, message: error.errorDescription ?? "All providers failed.", startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
         } catch let error as FileOrganizerError {
             recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
         } catch is CancellationError {
@@ -420,11 +463,8 @@ actor ProcessingPipeline {
             var partResults: [TranscriptionResult] = []
             partResults.reserveCapacity(renamedParts.count)
             for part in renamedParts {
-                let result = try await transcriptionClient.transcribe(
+                let result = try await runTranscription(
                     audio: part,
-                    baseURL: config.apiBaseURL,
-                    model: config.model,
-                    apiKey: config.apiKey,
                     prompt: prompt
                 )
                 partResults.append(result)
@@ -458,24 +498,30 @@ actor ProcessingPipeline {
             let initialStatus = initialNotionStatus()
             let initialClaudeCodeStatus = initialClaudeCodeStatus()
             let partCount = renamedParts.count
+            let providerLabel = mergedResult.providerName.isEmpty ? nil : mergedResult.providerName
+            let message = providerLabel.map {
+                "Transcribed via \($0) (\(partCount) parts) → \(meetingFolder.lastPathComponent)"
+            } ?? "Transcribed and filed (\(partCount) parts) → \(meetingFolder.lastPathComponent)"
             onAuditEntry(.init(
                 id: entryId,
                 kind: .success,
                 sourcePath: firstPart.path(percentEncoded: false),
-                message: "Transcribed and filed (\(partCount) parts) → \(meetingFolder.lastPathComponent)",
+                message: message,
                 durationMs: ms,
                 retryable: false,
                 contextAttached: prompt != nil,
                 organizationName: snapshot.organizationName,
                 notionStatus: initialStatus,
-                claudeCodeStatus: initialClaudeCodeStatus
+                claudeCodeStatus: initialClaudeCodeStatus,
+                transcriptionProvider: providerLabel
             ))
             onStateChange(.idle)
 
             // 7. One Notion write for the whole meeting. Same
-            // timestamped rendering as the single-file path.
+            // timestamped rendering as the single-file path; same
+            // provider-attribution footer.
             if case .attempt(let notionConfig, let writer) = notionMode {
-                let notionBody = TimestampedTranscriptFormatter.formatBody(for: mergedResult)
+                let notionBody = Self.composeNotionTranscript(for: mergedResult)
                 scheduleNotionWrite(
                     entryId: entryId,
                     config: notionConfig,
@@ -488,6 +534,8 @@ actor ProcessingPipeline {
 
         } catch let error as TranscriptionError {
             recordFailure(url: firstPart, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
+        } catch let error as RotatingTranscriber.RotationError {
+            recordFailure(url: firstPart, message: error.errorDescription ?? "All providers failed.", startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
         } catch let error as FileOrganizerError {
             recordFailure(url: firstPart, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
         } catch is CancellationError {
@@ -855,5 +903,19 @@ actor ProcessingPipeline {
     /// on the actor so the dictionary mutation is serialized.
     private func clearNotionTask(_ entryId: UUID) {
         notionTasks[entryId] = nil
+    }
+
+    /// Build the body that gets sent to the Notion writer's
+    /// `transcript:` arg. Starts with the timestamped per-segment
+    /// rendering, then appends a single-line footer attributing the
+    /// provider that produced the transcript (v0.4.5+) — empty
+    /// `providerName` (legacy path, no rotation) keeps the body
+    /// untouched.
+    nonisolated private static func composeNotionTranscript(
+        for result: TranscriptionResult
+    ) -> String {
+        let timestamped = TimestampedTranscriptFormatter.formatBody(for: result)
+        guard !result.providerName.isEmpty else { return timestamped }
+        return "\(timestamped)\n\n— Transcribed by \(result.providerName)"
     }
 }

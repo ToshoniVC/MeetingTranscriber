@@ -2,10 +2,11 @@ import Testing
 import Foundation
 @testable import Jot
 
-/// Tests for `AudioHijackController.toggleRecording(...)` and
-/// `stopRecordingIfActive(...)`. Both dependencies (the prompter and the
-/// shortcut invoker) are injected so no actual dialog appears and no
-/// Shortcuts URL gets opened.
+/// Tests for `AudioHijackController`'s three single-purpose methods
+/// (`startRecording`, `stopRecording`, `collectMetadata`) plus the
+/// menu-bar-driven `stopRecordingIfActive`. Both dependencies (the
+/// prompter and the shortcut invoker) are injected so no actual dialog
+/// appears and no Shortcuts URL gets opened.
 @MainActor
 struct AudioHijackControllerTests {
 
@@ -41,119 +42,35 @@ struct AudioHijackControllerTests {
         return Fixture(controller: controller, prompter: prompter, opener: opener, presence: presence)
     }
 
-    private func toggle(
-        _ controller: AudioHijackController,
-        isCurrentlyRecording: Bool = false,
-        organizations: [Organization] = [],
-        defaultOrgId: UUID? = nil
-    ) async throws -> RecordingAction {
-        try await controller.toggleRecording(
-            isCurrentlyRecording: isCurrentlyRecording,
-            startShortcutName: "Jot Start Recording",
-            stopShortcutName: "Jot Stop Recording",
-            organizations: organizations,
-            defaultOrgId: defaultOrgId
-        )
-    }
-
-    // MARK: - Toggle: start path (not currently recording)
+    // MARK: - startRecording
 
     @Test
-    func toggle_whenNotRecording_promptsAndOpensStartURL() async throws {
+    func startRecording_opensStartURL_andReturnsTimestamp() async throws {
         let f = makeFixture()
-        f.prompter.nextResponse = MeetingStartInputs(meetingName: "Standup")
-        let action = try await toggle(f.controller)
-        if case .started(let inputs) = action {
-            #expect(inputs.meetingName == "Standup")
-        } else {
-            Issue.record("Expected .started, got \(action)")
-        }
-        #expect(f.prompter.askCount == 1)
+        let before = Date()
+        let startedAt = try await f.controller.startRecording(startShortcutName: "Jot Start Recording")
+        let after = Date()
+
         #expect(f.opener.openedURLs.count == 1)
         let url = f.opener.openedURLs[0]
         #expect(url.scheme == "shortcuts")
         #expect(url.host == "run-shortcut")
         #expect(url.queryValue(named: "name") == "Jot Start Recording")
-        #expect(url.queryValue(named: "input") == "Standup")
-    }
-
-    @Test
-    func toggle_whenNotRecording_emptyName_omitsInputParam() async throws {
-        let f = makeFixture()
-        f.prompter.nextResponse = MeetingStartInputs(meetingName: "")
-        let action = try await toggle(f.controller)
-        if case .started(let inputs) = action {
-            #expect(inputs.meetingName == "")
-        } else {
-            Issue.record("Expected .started")
-        }
-        let url = f.opener.openedURLs[0]
+        // No input on the start Shortcut — meeting name is collected later.
         #expect(url.queryValue(named: "input") == nil)
-    }
-
-    @Test
-    func toggle_passesOrgsAndDefaultThrough() async throws {
-        let f = makeFixture()
-        let acme = Organization(name: "Acme", isDefault: true)
-        f.prompter.nextResponse = MeetingStartInputs(
-            meetingName: "Standup",
-            organizationId: acme.id,
-            meetingSpecificContext: "Notes"
-        )
-        let action = try await toggle(
-            f.controller,
-            organizations: [acme],
-            defaultOrgId: acme.id
-        )
-        #expect(f.prompter.lastOrganizations.map(\.id) == [acme.id])
-        #expect(f.prompter.lastDefaultOrgId == acme.id)
-        if case .started(let inputs) = action {
-            #expect(inputs.organizationId == acme.id)
-            #expect(inputs.meetingSpecificContext == "Notes")
-        } else {
-            Issue.record("Expected .started")
-        }
-    }
-
-    // MARK: - Toggle: stop path (caller says we're recording)
-
-    @Test
-    func toggle_whenCallerSaysRecording_opensStopURL_withoutPrompt() async throws {
-        let f = makeFixture()
-        let action = try await toggle(f.controller, isCurrentlyRecording: true)
-        #expect(action == .stopped)
+        // Timestamp must be captured before the user could possibly
+        // dismiss the (not-yet-shown) prompt.
+        #expect(startedAt >= before)
+        #expect(startedAt <= after)
+        // The prompt is NOT shown here — that's collectMetadata's job.
         #expect(f.prompter.askCount == 0)
-        #expect(f.opener.openedURLs.count == 1)
-        let url = f.opener.openedURLs[0]
-        #expect(url.queryValue(named: "name") == "Jot Stop Recording")
-        #expect(url.queryValue(named: "input") == nil)
     }
 
-    // MARK: - Cancel
-
     @Test
-    func toggle_whenUserCancelsPrompt_throwsUserCancelled() async {
-        let f = makeFixture()
-        f.prompter.nextResponse = nil
-        do {
-            _ = try await toggle(f.controller)
-            Issue.record("Expected throw")
-        } catch let error as AudioHijackRecordingError {
-            #expect(error == .userCancelled)
-        } catch {
-            Issue.record("Unexpected error type: \(error)")
-        }
-        #expect(f.opener.openedURLs.isEmpty)
-    }
-
-    // MARK: - Not installed
-
-    @Test
-    func toggle_whenAudioHijackNotInstalled_throws() async {
+    func startRecording_whenAHNotInstalled_throws() async {
         let f = makeFixture(audioHijackInstalled: false)
-        f.prompter.nextResponse = MeetingStartInputs(meetingName: "x")
         do {
-            _ = try await toggle(f.controller)
+            _ = try await f.controller.startRecording(startShortcutName: "Jot Start Recording")
             Issue.record("Expected throw")
         } catch let error as AudioHijackRecordingError {
             #expect(error == .audioHijackNotInstalled)
@@ -161,20 +78,16 @@ struct AudioHijackControllerTests {
             Issue.record("Unexpected error type: \(error)")
         }
         #expect(f.opener.openedURLs.isEmpty)
-        #expect(f.prompter.askCount == 0)
     }
 
-    // MARK: - URL-open failures
-
     @Test
-    func toggle_openerFailure_throwsShortcutOpenFailed() async {
+    func startRecording_openerFailure_throwsShortcutOpenFailed() async {
         let f = makeFixture()
-        f.prompter.nextResponse = MeetingStartInputs(meetingName: "x")
         f.opener.nextError = NSError(domain: "test", code: 1, userInfo: [
             NSLocalizedDescriptionKey: "Shortcuts unavailable"
         ])
         do {
-            _ = try await toggle(f.controller)
+            _ = try await f.controller.startRecording(startShortcutName: "Jot Start Recording")
             Issue.record("Expected throw")
         } catch let error as AudioHijackRecordingError {
             if case .shortcutOpenFailed(let name, let detail) = error {
@@ -186,6 +99,76 @@ struct AudioHijackControllerTests {
         } catch {
             Issue.record("Unexpected error type: \(error)")
         }
+    }
+
+    // MARK: - stopRecording
+
+    @Test
+    func stopRecording_opensStopURL() async throws {
+        let f = makeFixture()
+        try await f.controller.stopRecording(stopShortcutName: "Jot Stop Recording")
+        #expect(f.opener.openedURLs.count == 1)
+        let url = f.opener.openedURLs[0]
+        #expect(url.queryValue(named: "name") == "Jot Stop Recording")
+        #expect(url.queryValue(named: "input") == nil)
+    }
+
+    @Test
+    func stopRecording_whenAHNotInstalled_throws() async {
+        let f = makeFixture(audioHijackInstalled: false)
+        do {
+            try await f.controller.stopRecording(stopShortcutName: "Jot Stop Recording")
+            Issue.record("Expected throw")
+        } catch let error as AudioHijackRecordingError {
+            #expect(error == .audioHijackNotInstalled)
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
+    }
+
+    // MARK: - collectMetadata
+
+    @Test
+    func collectMetadata_returnsInputs_andDoesNotTouchAH() async throws {
+        let f = makeFixture()
+        f.prompter.nextResponse = MeetingStartInputs(meetingName: "Standup")
+        let result = await f.controller.collectMetadata(
+            organizations: [],
+            defaultOrgId: nil
+        )
+        #expect(result?.meetingName == "Standup")
+        #expect(f.prompter.askCount == 1)
+        // No AH side-effects — recording was already running before
+        // metadata collection began.
+        #expect(f.opener.openedURLs.isEmpty)
+    }
+
+    @Test
+    func collectMetadata_userCancel_returnsNil() async {
+        let f = makeFixture()
+        f.prompter.nextResponse = nil
+        let result = await f.controller.collectMetadata(
+            organizations: [],
+            defaultOrgId: nil
+        )
+        #expect(result == nil)
+    }
+
+    @Test
+    func collectMetadata_passesOrgsAndDefaultThrough() async {
+        let f = makeFixture()
+        let acme = Organization(name: "Acme", isDefault: true)
+        f.prompter.nextResponse = MeetingStartInputs(
+            meetingName: "Standup",
+            organizationId: acme.id,
+            meetingSpecificContext: "Notes"
+        )
+        _ = await f.controller.collectMetadata(
+            organizations: [acme],
+            defaultOrgId: acme.id
+        )
+        #expect(f.prompter.lastOrganizations.map(\.id) == [acme.id])
+        #expect(f.prompter.lastDefaultOrgId == acme.id)
     }
 
     // MARK: - Force-stop

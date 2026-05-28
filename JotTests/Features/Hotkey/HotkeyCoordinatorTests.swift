@@ -114,7 +114,7 @@ struct HotkeyCoordinatorTests {
     // MARK: - Trigger → built-in Audio Hijack (default)
 
     @Test
-    func firingHotkey_default_opensStartShortcutURL() async throws {
+    func firingHotkey_default_opensStartShortcutURL_beforePrompt() async throws {
         let f = makeFixture()
         f.prompter.nextResponse = inputs("Standup")
         f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
@@ -129,7 +129,31 @@ struct HotkeyCoordinatorTests {
         #expect(url.scheme == "shortcuts")
         #expect(url.host == "run-shortcut")
         #expect(url.queryValue(named: "name") == f.settings.startShortcutName)
-        #expect(url.queryValue(named: "input") == "Standup")
+        // v0.4.1: recording starts immediately, meeting name is collected
+        // afterwards — so the start Shortcut no longer receives it on stdin.
+        // The pipeline's downstream rename handles filename → meeting name.
+        #expect(url.queryValue(named: "input") == nil)
+    }
+
+    @Test
+    func firingHotkey_marksMenuBarRecordingBeforePromptIsAnswered() async throws {
+        let f = makeFixture()
+        // Stub: simulate a slow prompt by holding the response in a way
+        // that the menu bar should already show recording before the
+        // metadata arrives. We can't easily delay the synchronous stub,
+        // but we can observe that after the trigger fires, isRecording
+        // is true even though recordingMeetingName starts nil (placeholder).
+        f.prompter.nextResponse = inputs("Demo")
+        f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
+        await f.coordinator.bootstrap()
+
+        f.registrar.fireTrigger()
+        // Yield so the start Shortcut + setRecording(true) lands.
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(f.menuBar.isRecording == true)
+        // Long enough for the detached metadata task to resolve too.
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(f.menuBar.recordingMeetingName == "Demo")
     }
 
     @Test
@@ -175,7 +199,7 @@ struct HotkeyCoordinatorTests {
     }
 
     @Test
-    func firingHotkey_builtIn_appendsInfoAuditEntryWithMeetingNameAndOrg() async throws {
+    func firingHotkey_builtIn_appendsTwoInfoEntries_immediateStartAndPostMetadata() async throws {
         let f = makeFixture()
         let acme = try f.organizations.upsert(Organization(name: "Acme"))
         f.prompter.nextResponse = MeetingStartInputs(
@@ -188,13 +212,18 @@ struct HotkeyCoordinatorTests {
         f.registrar.fireTrigger()
         try await Task.sleep(nanoseconds: 100_000_000)
 
-        #expect(f.auditLog.entries.first?.kind == .info)
-        #expect(f.auditLog.entries.first?.message.contains("Demo Meeting") == true)
-        #expect(f.auditLog.entries.first?.message.contains("Acme") == true)
+        // Two info entries: immediate "started — awaiting" then "details saved".
+        // entries is newest-first, so [0] = "details saved", [1] = "started".
+        #expect(f.auditLog.entries.count >= 2)
+        #expect(f.auditLog.entries[0].kind == .info)
+        #expect(f.auditLog.entries[0].message.contains("Demo Meeting") == true)
+        #expect(f.auditLog.entries[0].message.contains("Acme") == true)
+        #expect(f.auditLog.entries[0].message.contains("details") == true)
+        #expect(f.auditLog.entries.last?.message.contains("awaiting") == true)
     }
 
     @Test
-    func firingHotkey_builtIn_userCancels_addsNoAuditEntry() async throws {
+    func firingHotkey_builtIn_userSkipsMetadata_logsInfoAndKeepsRecording() async throws {
         let f = makeFixture()
         f.prompter.nextResponse = nil
         f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
@@ -203,7 +232,16 @@ struct HotkeyCoordinatorTests {
         f.registrar.fireTrigger()
         try await Task.sleep(nanoseconds: 100_000_000)
 
-        #expect(f.auditLog.entries.isEmpty, "Cancel should be silent — no audit row")
+        // v0.4.1: recording has already started, so cancel is an info
+        // event (not a failure) and the menu bar still shows recording.
+        #expect(f.auditLog.entries.contains { $0.message.contains("awaiting") })
+        #expect(f.auditLog.entries.contains { $0.message.contains("skipped") })
+        #expect(f.auditLog.entries.allSatisfy { $0.kind == .info })
+        #expect(f.menuBar.isRecording == true)
+        #expect(f.menuBar.recordingMeetingName == nil)
+        // No snapshot stamped — pipeline will process the audio with
+        // basename + no context (same as non-Jot-kicked recordings).
+        #expect(f.meetingContextStore.pending == nil)
     }
 
     @Test
@@ -333,12 +371,16 @@ struct HotkeyCoordinatorTests {
     }
 
     @Test
-    func testRecordingNow_builtIn_userCancelReturnsNilWithoutLogging() async {
+    func testRecordingNow_builtIn_userSkipsMetadata_returnsNilAndLogsInfoOnly() async throws {
         let f = makeFixture()
         f.prompter.nextResponse = nil
         let error = await f.coordinator.testRecordingNow()
         #expect(error == nil)
-        #expect(f.auditLog.entries.isEmpty)
+        // v0.4.1: skipping the prompt isn't an error — recording is
+        // already running. Audit gets info rows (started + skipped),
+        // no failure row.
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(f.auditLog.entries.allSatisfy { $0.kind == .info })
     }
 
     @Test

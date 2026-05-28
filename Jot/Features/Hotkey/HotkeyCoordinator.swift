@@ -111,17 +111,9 @@ final class HotkeyCoordinator {
     func testRecordingNow() async -> String? {
         if settings.useBuiltInRecording {
             do {
-                let action = try await audioHijack.toggleRecording(
-                    isCurrentlyRecording: menuBar.isRecording,
-                    startShortcutName: settings.startShortcutName,
-                    stopShortcutName: settings.stopShortcutName,
-                    organizations: organizations.organizations,
-                    defaultOrgId: organizations.defaultOrg()?.id
-                )
-                applyAudioHijackAction(action, source: "Manual")
+                try await runBuiltInToggle(source: "Manual")
                 return nil
             } catch let error as AudioHijackRecordingError {
-                if error == .userCancelled { return nil } // Not really a failure.
                 auditLog.append(.init(
                     kind: .failure,
                     sourcePath: "AudioHijack",
@@ -243,17 +235,9 @@ final class HotkeyCoordinator {
 
     private func fireBuiltInAudioHijack() async {
         do {
-            let action = try await audioHijack.toggleRecording(
-                isCurrentlyRecording: menuBar.isRecording,
-                startShortcutName: settings.startShortcutName,
-                stopShortcutName: settings.stopShortcutName,
-                organizations: organizations.organizations,
-                defaultOrgId: organizations.defaultOrg()?.id
-            )
-            applyAudioHijackAction(action, source: "Hotkey")
+            try await runBuiltInToggle(source: "Hotkey")
             lastTriggerError = nil
         } catch let error as AudioHijackRecordingError {
-            if error == .userCancelled { return } // Quiet cancel — no audit row.
             lastTriggerError = error.userFacingMessage
             auditLog.append(.init(
                 kind: .failure,
@@ -270,35 +254,19 @@ final class HotkeyCoordinator {
         }
     }
 
-    /// Shared post-action handling: drive the menu-bar recording indicator
-    /// and append the right audit entry. Used by both the hotkey trigger
-    /// and the Test recording button.
-    private func applyAudioHijackAction(_ action: RecordingAction, source: String) {
-        switch action {
-        case .started(let inputs):
-            menuBar.setRecording(true, meetingName: inputs.meetingName)
-            let org = inputs.organizationId.flatMap { organizations.organization(id: $0) }
-            let compiled = ContextCompiler.compile(
-                meetingName: inputs.meetingName,
-                meetingSpecificContext: inputs.meetingSpecificContext,
-                organization: org
-            )
-            meetingContextStore.recordStarted(
-                meetingName: inputs.meetingName,
-                organizationId: inputs.organizationId,
-                organizationName: org?.name,
-                meetingSpecificContext: inputs.meetingSpecificContext,
-                resolvedCompiledContext: compiled
-            )
-            let orgSuffix = org.map { " · \($0.name)" } ?? " · No Organization"
-            auditLog.append(.init(
-                kind: .info,
-                sourcePath: "AudioHijack",
-                message: inputs.meetingName.isEmpty
-                    ? "\(source): started recording"
-                    : "\(source): started recording '\(inputs.meetingName)'\(orgSuffix)"
-            ))
-        case .stopped:
+    /// Recording-first toggle: if not currently recording, runs the start
+    /// Shortcut immediately and then collects metadata in the background
+    /// so the user can fill the prompt while AH is already capturing
+    /// audio (v0.4.1, Backlog "start recording on hotkey press"). If
+    /// already recording, runs the stop Shortcut and clears the snapshot.
+    ///
+    /// Throws `AudioHijackRecordingError` on a *real* failure (AH not
+    /// installed, Shortcut URL didn't open). User cancellation of the
+    /// metadata prompt is **not** an error here — the recording is still
+    /// running by that point and "skipped metadata" is just an info row.
+    private func runBuiltInToggle(source: String) async throws {
+        if menuBar.isRecording {
+            try await audioHijack.stopRecording(stopShortcutName: settings.stopShortcutName)
             menuBar.setRecording(false)
             meetingContextStore.recordStopped()
             auditLog.append(.init(
@@ -306,7 +274,73 @@ final class HotkeyCoordinator {
                 sourcePath: "AudioHijack",
                 message: "\(source): stopped recording"
             ))
+            return
         }
+
+        // Start path: fire AH first so recording is already running before
+        // the user sees the prompt.
+        let startedAt = try await audioHijack.startRecording(
+            startShortcutName: settings.startShortcutName
+        )
+        menuBar.setRecording(true, meetingName: nil)
+        auditLog.append(.init(
+            kind: .info,
+            sourcePath: "AudioHijack",
+            message: "\(source): started recording — awaiting meeting details"
+        ))
+
+        // Collect metadata concurrently. The prompt may be modal (NSAlert),
+        // but AH is recording in its own process so the user's actual
+        // meeting capture is unaffected. The detached task is fine to
+        // outlive this call — its only effect is to update the in-flight
+        // snapshot + menu bar label when the user submits.
+        Task { @MainActor [weak self] in
+            await self?.collectMetadataAndStamp(startedAt: startedAt, source: source)
+        }
+    }
+
+    /// Prompt for meeting metadata and, on submit, stamp the snapshot
+    /// store with `at: startedAt` so the pipeline's time-window guard
+    /// matches the file AH produced. On cancel, leave the recording
+    /// running and log an info row; the file will process with audio
+    /// basename + no context, same as a non-Jot-kicked recording.
+    private func collectMetadataAndStamp(startedAt: Date, source: String) async {
+        let inputs = await audioHijack.collectMetadata(
+            organizations: organizations.organizations,
+            defaultOrgId: organizations.defaultOrg()?.id
+        )
+        guard let inputs else {
+            auditLog.append(.init(
+                kind: .info,
+                sourcePath: "AudioHijack",
+                message: "\(source): meeting details skipped — recording continues"
+            ))
+            return
+        }
+
+        let org = inputs.organizationId.flatMap { organizations.organization(id: $0) }
+        let compiled = ContextCompiler.compile(
+            meetingName: inputs.meetingName,
+            meetingSpecificContext: inputs.meetingSpecificContext,
+            organization: org
+        )
+        meetingContextStore.recordStarted(
+            meetingName: inputs.meetingName,
+            organizationId: inputs.organizationId,
+            organizationName: org?.name,
+            meetingSpecificContext: inputs.meetingSpecificContext,
+            resolvedCompiledContext: compiled,
+            at: startedAt
+        )
+        menuBar.setRecording(true, meetingName: inputs.meetingName)
+        let orgSuffix = org.map { " · \($0.name)" } ?? " · No Organization"
+        auditLog.append(.init(
+            kind: .info,
+            sourcePath: "AudioHijack",
+            message: inputs.meetingName.isEmpty
+                ? "\(source): meeting details saved"
+                : "\(source): meeting details saved — '\(inputs.meetingName)'\(orgSuffix)"
+        ))
     }
 
     private func fireCustomShortcut() async {

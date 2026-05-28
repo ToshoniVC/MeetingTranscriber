@@ -5,6 +5,36 @@ Versions are tagged from `main` (`v0.1.0`, `v0.1.1`, …) and built/signed by
 release notes from the `<description>` element in `docs/appcast.xml`, not
 this file — this is the long-form humans-only log.
 
+## v0.4.1 — Recording starts on hotkey press
+
+Removes the friction where the recording hotkey opened a modal prompt
+*before* Audio Hijack started capturing — you'd press the shortcut at
+the top of a meeting and miss the first sentence while typing the
+meeting name. Now the hotkey runs the start Shortcut immediately and
+the metadata prompt appears alongside, to be filled in whenever you
+get a chance during the meeting.
+
+- **Recording-first hotkey.** Pressing the hotkey runs the AH start
+  Shortcut as the very first thing; the menu bar flips to recording
+  with a "Recording…" placeholder. A non-blocking metadata prompt
+  appears so meeting name + organization + per-meeting context can be
+  filled in while the meeting is already being captured.
+- **Skip is supported.** The prompt's secondary button is "Skip" (was
+  "Cancel"). Skipping leaves the recording running with no metadata —
+  the file processes with the audio basename and no compiled context,
+  same as a recording that wasn't kicked off via Jot.
+- **Snapshot timestamping.** `MeetingContextStore.recordStarted` is
+  stamped with the original recording-start timestamp (captured the
+  moment the AH start Shortcut fired) so the pipeline's time-window
+  guard still matches the audio file Jot picks up, even when the user
+  takes a minute to fill in the prompt.
+- **Internal refactor.** `AudioHijackController.toggleRecording` is
+  split into single-purpose `startRecording(...) -> Date`,
+  `stopRecording(...)`, and `collectMetadata(...)` — the old toggle
+  shape couldn't model "started without metadata, metadata arrives
+  later." Callers (`HotkeyCoordinator.fireBuiltInAudioHijack` and
+  `testRecordingNow`) compose the three methods.
+
 ## v0.4.0 — Claude Code meeting notes + date-stamped Notion pages
 
 Optional post-Notion routine trigger that asks a Claude Code routine to

@@ -12,4 +12,4 @@
 
 [x] Add meeting date to notion db when creating page.
 
-[ ] make sure the recording starts once I hit the shortcut, giving me time to add the meeting details in the pop-up.
+[x] make sure the recording starts once I hit the shortcut, giving me time to add the meeting details in the pop-up.

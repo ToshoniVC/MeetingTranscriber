@@ -7,6 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DE2A10363282FB2EB103BA94 /* ManualUploadCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B50683EF969D2940729F9898 /* ManualUploadCoordinator.swift */; };
+		BD66BA5CC76FE79B93E289EB /* ManualUploadError.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E953D7CE31C092FF0446892 /* ManualUploadError.swift */; };
+		14F855567E8163933A346296 /* ManualUploadFilePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBA657E3E3D4B4DE98E1A210 /* ManualUploadFilePicker.swift */; };
+		DB0202A2A85A728AEE838ED8 /* ManualUploadMediaKind.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2267BAB80742E9F11C503D5 /* ManualUploadMediaKind.swift */; };
+		C9BDEF16C7697A1F2237D67A /* ManualUploadPrompter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C87D6A4CA9B2E6FE4AE7E1FF /* ManualUploadPrompter.swift */; };
+		1A6051C5EC4B90C3F0638DE4 /* ManualUploadStagingService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53CF7F67AFEEB93C931ECEBA /* ManualUploadStagingService.swift */; };
+		2536962EE6510ED98FB91A29 /* MediaConversionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48343233125FA4F8B99A7595 /* MediaConversionService.swift */; };
+		556D14C3393078ADA868C9CE /* ManualUploadCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F40DC45BBBF10F67F98E0656 /* ManualUploadCoordinatorTests.swift */; };
+		F6A74968B223C61B4B7615CC /* ManualUploadStagingServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D79B3B51894D598CCCF1BAF /* ManualUploadStagingServiceTests.swift */; };
+		B32CD518F0F5BF41C731E5EB /* MediaConversionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED443A5A9AAE4CFFB74715DC /* MediaConversionServiceTests.swift */; };
+		AD592ECE02E496C0FFE45A24 /* StubMeetingUploadPrompter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1983689A7B7F1E0CECA2224 /* StubMeetingUploadPrompter.swift */; };
 		02E4DEB6612EAEEFBD8D242E /* AuditLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 216AE69DA548C428D23109BD /* AuditLogStore.swift */; };
 		0506FE90B3840653EA29CAF2 /* ClaudeCodeRoutineClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F22F4FEB0621AA91862473FD /* ClaudeCodeRoutineClient.swift */; };
 		05E7761F15F9A60F3E5B60F6 /* AppSettingsClaudeCodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 582913C58D69F5B90D3C5F88 /* AppSettingsClaudeCodeTests.swift */; };
@@ -183,6 +194,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		B50683EF969D2940729F9898 /* ManualUploadCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualUploadCoordinator.swift; sourceTree = "<group>"; };
+		1E953D7CE31C092FF0446892 /* ManualUploadError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualUploadError.swift; sourceTree = "<group>"; };
+		BBA657E3E3D4B4DE98E1A210 /* ManualUploadFilePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualUploadFilePicker.swift; sourceTree = "<group>"; };
+		C2267BAB80742E9F11C503D5 /* ManualUploadMediaKind.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualUploadMediaKind.swift; sourceTree = "<group>"; };
+		C87D6A4CA9B2E6FE4AE7E1FF /* ManualUploadPrompter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualUploadPrompter.swift; sourceTree = "<group>"; };
+		53CF7F67AFEEB93C931ECEBA /* ManualUploadStagingService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualUploadStagingService.swift; sourceTree = "<group>"; };
+		48343233125FA4F8B99A7595 /* MediaConversionService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaConversionService.swift; sourceTree = "<group>"; };
+		F40DC45BBBF10F67F98E0656 /* ManualUploadCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualUploadCoordinatorTests.swift; sourceTree = "<group>"; };
+		1D79B3B51894D598CCCF1BAF /* ManualUploadStagingServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualUploadStagingServiceTests.swift; sourceTree = "<group>"; };
+		ED443A5A9AAE4CFFB74715DC /* MediaConversionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaConversionServiceTests.swift; sourceTree = "<group>"; };
+		C1983689A7B7F1E0CECA2224 /* StubMeetingUploadPrompter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StubMeetingUploadPrompter.swift; sourceTree = "<group>"; };
 		02C058F285F9DAA22BCF89B6 /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
 		031A751DE76856F94DF819F3 /* NotionMeetingWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotionMeetingWriter.swift; sourceTree = "<group>"; };
 		0339E37A19A7EECFC019395F /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
@@ -351,6 +373,7 @@
 		E43B740D303F1F18F5A48671 /* RecordingWorkspaceActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingWorkspaceActions.swift; sourceTree = "<group>"; };
 		E45E606177953D0CF08F3549 /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
 		E615560456029811A82F1D82 /* OrganizationValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizationValidationTests.swift; sourceTree = "<group>"; };
+		DC24EB679C4C8024242CBF6F /* implementation-plan_claudeCodeMeetingNotes_v2026_05_28.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "implementation-plan_claudeCodeMeetingNotes_v2026_05_28.md"; sourceTree = "<group>"; };
 		E685A8FFD7C584092A918648 /* implementation-plan_addContext_v2026_05_28.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "implementation-plan_addContext_v2026_05_28.md"; sourceTree = "<group>"; };
 		E68A426A790FAC9E086AE130 /* FileOrganizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileOrganizer.swift; sourceTree = "<group>"; };
 		EA29F37033552696809DF5C5 /* KeyCombo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyCombo.swift; sourceTree = "<group>"; };
@@ -394,6 +417,30 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		3FE2D6B99C162D14720CD576 /* ManualUpload */ = {
+			isa = PBXGroup;
+			children = (
+				B50683EF969D2940729F9898 /* ManualUploadCoordinator.swift */,
+				1E953D7CE31C092FF0446892 /* ManualUploadError.swift */,
+				BBA657E3E3D4B4DE98E1A210 /* ManualUploadFilePicker.swift */,
+				C2267BAB80742E9F11C503D5 /* ManualUploadMediaKind.swift */,
+				C87D6A4CA9B2E6FE4AE7E1FF /* ManualUploadPrompter.swift */,
+				53CF7F67AFEEB93C931ECEBA /* ManualUploadStagingService.swift */,
+				48343233125FA4F8B99A7595 /* MediaConversionService.swift */,
+			);
+			path = ManualUpload;
+			sourceTree = "<group>";
+		};
+		615F502EC5492A6268CD285F /* ManualUpload */ = {
+			isa = PBXGroup;
+			children = (
+				F40DC45BBBF10F67F98E0656 /* ManualUploadCoordinatorTests.swift */,
+				1D79B3B51894D598CCCF1BAF /* ManualUploadStagingServiceTests.swift */,
+				ED443A5A9AAE4CFFB74715DC /* MediaConversionServiceTests.swift */,
+			);
+			path = ManualUpload;
+			sourceTree = "<group>";
+		};
 		0A2C61B27442E91C9E8B3B92 /* Transcripts */ = {
 			isa = PBXGroup;
 			children = (
@@ -593,6 +640,7 @@
 			isa = PBXGroup;
 			children = (
 				ADF8F0C0794CB36FA47E3E8C /* AddContext_PRD_2026_05_28.md */,
+				8ED762D76E34859DC12CC07F /* CreateClaudeCodeMeetingNotes_PRD_2026_05_28.md */,
 				4F46C64CAF803A8ED2127409 /* CreateNotionMeeting_PRD_2026_05_28.md */,
 				8549355AFCCD5943FD32D966 /* MeetingTranscriber_PRD_v2026_05_27.md */,
 			);
@@ -816,6 +864,7 @@
 			isa = PBXGroup;
 			children = (
 				E685A8FFD7C584092A918648 /* implementation-plan_addContext_v2026_05_28.md */,
+				DC24EB679C4C8024242CBF6F /* implementation-plan_claudeCodeMeetingNotes_v2026_05_28.md */,
 				3D891C245A3219D9BBAD0635 /* implementation-plan_createNotionMeeting_v2026_05_28.md */,
 				A203A21A1063FAB76C398B2A /* implementation-plan_v2026_05_27.md */,
 			);
@@ -876,6 +925,7 @@
 				0A2C61B27442E91C9E8B3B92 /* Transcripts */,
 				7CDAE7DD4B5F4FF0F00B67F4 /* Watcher */,
 				0339E37A19A7EECFC019395F /* .gitkeep */,
+				615F502EC5492A6268CD285F /* ManualUpload */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -904,6 +954,7 @@
 				8F11100474748353695B5D13 /* RecordingURLOpener.swift */,
 				E43B740D303F1F18F5A48671 /* RecordingWorkspaceActions.swift */,
 				5E1750C6E87DC2147D8377B2 /* StubMeetingStartPrompter.swift */,
+				C1983689A7B7F1E0CECA2224 /* StubMeetingUploadPrompter.swift */,
 			);
 			path = Helpers;
 			sourceTree = "<group>";
@@ -962,6 +1013,7 @@
 				EAC7B0EDE24408DBBECC062B /* Transcription */,
 				21DEB2648B257236271570A1 /* Transcripts */,
 				0BB1CF55C3FB5ECC4C9E4E13 /* Watcher */,
+				3FE2D6B99C162D14720CD576 /* ManualUpload */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -996,7 +1048,6 @@
 				5F548A24349D9E9FDB1F3694 /* archive */,
 				B67204B05050DB0247030871 /* Backlog.md */,
 				C593A05ED6B0F93CDE267D9A /* CodeReview_Feedback_2026_05_28.md */,
-				8ED762D76E34859DC12CC07F /* CreateClaudeCodeMeetingNotes_PRD_2026_05_28.md */,
 				5815D183023E9F6D9C52A5BE /* ManualUpload_PRD_2026_05_28.md */,
 			);
 			path = PRD;
@@ -1225,6 +1276,13 @@
 				5F804A4EEB2C8081DC3DAC6E /* TranscriptionResult.swift in Sources */,
 				08F9F939786209ACDA9EC749 /* TranscriptsView.swift in Sources */,
 				E994126055B69EC0E078CD8B /* TranscriptsViewModel.swift in Sources */,
+				DE2A10363282FB2EB103BA94 /* ManualUploadCoordinator.swift in Sources */,
+				BD66BA5CC76FE79B93E289EB /* ManualUploadError.swift in Sources */,
+				14F855567E8163933A346296 /* ManualUploadFilePicker.swift in Sources */,
+				DB0202A2A85A728AEE838ED8 /* ManualUploadMediaKind.swift in Sources */,
+				C9BDEF16C7697A1F2237D67A /* ManualUploadPrompter.swift in Sources */,
+				1A6051C5EC4B90C3F0638DE4 /* ManualUploadStagingService.swift in Sources */,
+				2536962EE6510ED98FB91A29 /* MediaConversionService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1308,6 +1366,10 @@
 				1DA10CC9A972277BC5B616F0 /* TranscriptionRequestTests.swift in Sources */,
 				1C2FC0DFFD459206504E6F78 /* TranscriptionResultMergingTests.swift in Sources */,
 				D7B29093D6BCC2A6E8E93B68 /* TranscriptsViewModelTests.swift in Sources */,
+				556D14C3393078ADA868C9CE /* ManualUploadCoordinatorTests.swift in Sources */,
+				F6A74968B223C61B4B7615CC /* ManualUploadStagingServiceTests.swift in Sources */,
+				B32CD518F0F5BF41C731E5EB /* MediaConversionServiceTests.swift in Sources */,
+				AD592ECE02E496C0FFE45A24 /* StubMeetingUploadPrompter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

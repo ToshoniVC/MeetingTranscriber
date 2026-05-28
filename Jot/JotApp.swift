@@ -17,6 +17,8 @@ struct JotApp: App {
     @State private var loginItem: LoginItemController
     @State private var audioHijack: AudioHijackPresence
     @State private var audioHijackController: AudioHijackController
+    @State private var errorInspector: ErrorInspector
+    @State private var debugMode: DebugMode
 
     init() {
         let menuBar = MenuBarController()
@@ -43,6 +45,8 @@ struct JotApp: App {
             auditLog: auditLog
         )
         let loginItem = LoginItemController(manager: LoginItemManager())
+        let errorInspector = ErrorInspector()
+        let debugMode = DebugMode()
         self._menuBar = State(initialValue: menuBar)
         self._settings = State(initialValue: settings)
         self._auditLog = State(initialValue: auditLog)
@@ -51,11 +55,19 @@ struct JotApp: App {
         self._loginItem = State(initialValue: loginItem)
         self._audioHijack = State(initialValue: audioHijack)
         self._audioHijackController = State(initialValue: ahController)
+        self._errorInspector = State(initialValue: errorInspector)
+        self._debugMode = State(initialValue: debugMode)
     }
 
     var body: some Scene {
         MenuBarExtra {
-            MenuBarDropdown(menuBar: menuBar, pipeline: pipeline, hotkey: hotkey)
+            MenuBarDropdown(
+                menuBar: menuBar,
+                pipeline: pipeline,
+                hotkey: hotkey,
+                errorInspector: errorInspector,
+                debugMode: debugMode
+            )
         } label: {
             MenuBarIconLabel(
                 isRecording: menuBar.isRecording,
@@ -74,6 +86,8 @@ struct JotApp: App {
                 .environment(loginItem)
                 .environment(audioHijack)
                 .environment(audioHijackController)
+                .environment(errorInspector)
+                .environment(debugMode)
                 .frame(minWidth: 760, minHeight: 480)
                 .task {
                     await pipeline.bootstrap()
@@ -154,6 +168,8 @@ private struct MenuBarDropdown: View {
     let menuBar: MenuBarController
     let pipeline: PipelineCoordinator
     let hotkey: HotkeyCoordinator
+    let errorInspector: ErrorInspector
+    let debugMode: DebugMode
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
@@ -172,9 +188,15 @@ private struct MenuBarDropdown: View {
             Divider()
         }
 
-        // "Dismiss error" only shown while the icon is red, so the menu
-        // stays tidy in the normal case.
+        // Error-state actions: show details (opens the inspector modal in
+        // the main window) and dismiss. Both only visible while the icon
+        // is red, so the menu stays tidy in the normal case.
         if case .error = menuBar.iconState {
+            Button("Show error details…") {
+                errorInspector.show(pipelineState: menuBar.iconState)
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
+            }
             Button("Dismiss error") {
                 pipeline.dismissError()
             }
@@ -189,9 +211,42 @@ private struct MenuBarDropdown: View {
 
         Divider()
 
+        // Developer submenu — keeps the rest of the dropdown clean for
+        // normal use. The verbose-mode toggle and developer affordances
+        // (Open Console, copy log command) live here.
+        Menu("Developer") {
+            Button(debugMode.isVerbose ? "Verbose logging: ON" : "Verbose logging: OFF") {
+                debugMode.toggle()
+            }
+            if debugMode.isVerbose {
+                Divider()
+                Button("Open Console.app") {
+                    openConsoleApp()
+                }
+                Button("Copy 'log show' command") {
+                    copyLogShowCommand()
+                }
+            }
+        }
+
+        Divider()
+
         Button("Quit \(JotApp.appDisplayName)") {
             NSApplication.shared.terminate(nil)
         }
         .keyboardShortcut("q")
+    }
+
+    private func openConsoleApp() {
+        let consoleURL = URL(fileURLWithPath: "/System/Applications/Utilities/Console.app")
+        NSWorkspace.shared.open(consoleURL)
+    }
+
+    private func copyLogShowCommand() {
+        // Pre-built command the user can paste into Terminal. Streams the
+        // last 30 minutes of os.Logger output filtered to Jot's subsystem.
+        let cmd = #"log show --predicate 'subsystem == "com.toshonivc.jot"' --info --debug --last 30m"#
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(cmd, forType: .string)
     }
 }

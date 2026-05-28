@@ -9,8 +9,11 @@ import SwiftUI
 /// (Phase 1 for Settings, Phase 5 for Audit Log, Phase 6 for Transcripts).
 struct MainWindow: View {
     @State private var selection: MainTab = .transcripts
+    @Environment(ErrorInspector.self) private var inspector
 
     var body: some View {
+        @Bindable var inspectorBinding = inspector
+
         NavigationSplitView {
             List(MainTab.allCases, selection: $selection) { tab in
                 Label(tab.title, systemImage: tab.systemImage)
@@ -24,6 +27,19 @@ struct MainWindow: View {
             case .auditLog:    AuditLogView()
             case .settings:    SettingsView()
             }
+        }
+        // Single error-inspector sheet hosted at the window level so it
+        // appears regardless of which tab is in front. `.sheet(item:)`
+        // shows when `currentError` is non-nil and hides when it's nil.
+        .sheet(item: $inspectorBinding.currentError) { details in
+            ErrorInspectorView(
+                details: details,
+                onDismiss: { inspector.dismiss() },
+                onOpenAuditLog: {
+                    selection = .auditLog
+                    inspector.dismiss()
+                }
+            )
         }
     }
 }

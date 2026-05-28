@@ -8,6 +8,9 @@ import SwiftUI
 struct AuditLogRow: View {
     let entry: AuditLogEntry
     let onRetry: () -> Void
+    /// Optional — only populated for failure rows. When set, a "Details"
+    /// button surfaces the error inspector modal with this entry.
+    let onShowDetails: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -40,6 +43,13 @@ struct AuditLogRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Failure-only "Details" button, opens the modal inspector
+            // with the full message + Copy details affordance.
+            if entry.kind == .failure, let onShowDetails {
+                Button("Details") { onShowDetails() }
+                    .controlSize(.small)
+            }
 
             if entry.retryable {
                 Button("Retry") { onRetry() }

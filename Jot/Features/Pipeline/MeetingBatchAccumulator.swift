@@ -121,7 +121,15 @@ actor MeetingBatchAccumulator {
     /// Note that recording has started. Any in-flight session (e.g., a
     /// previous recording whose settle timer is still ticking) flushes
     /// immediately so its parts don't leak into the new meeting.
+    ///
+    /// Cancels the pending settle task *before* flushing — `flushNow`
+    /// itself no longer cancels (see its doc comment for why), so without
+    /// this cancel here a still-sleeping settle from the previous session
+    /// would later wake up, run `flushNow`, and prematurely emit the
+    /// new session.
     func noteRecordingStarted(snapshot: MeetingContextSnapshot, at startedAt: Date) async {
+        settleTask?.cancel()
+        settleTask = nil
         await flushNow()
         currentSession = Session(
             snapshot: snapshot,
@@ -188,10 +196,22 @@ actor MeetingBatchAccumulator {
     /// zero parts emit nothing, one part emits as `.single` (no need for
     /// a batch wrapper when there was no split), two-or-more parts emit
     /// as `.batch`. The session is cleared in all cases.
+    ///
+    /// **Do not cancel `settleTask` here.** This method runs *inside*
+    /// `settleTask` on the timer-driven path (the task wakes up from its
+    /// sleep and calls `flushNow` as its last act). Calling
+    /// `settleTask?.cancel()` would mark the running task as cancelled —
+    /// and the very next thing we do is `await emit(.single(...))`, which
+    /// reaches into `process(url:)` → `URLSession.upload(...)`. URLSession
+    /// honours `Task.isCancelled` and bails the upload with
+    /// `URLError(.cancelled)`, surfacing as a spurious "Network error:
+    /// cancelled" on every first-time recording transcription (v0.4.2 bug).
+    /// External callers that need to abort a pending settle
+    /// (`stop()`, `noteRecordingStarted`) cancel it themselves before
+    /// reaching this method.
     private func flushNow() async {
         guard let session = currentSession else { return }
         currentSession = nil
-        settleTask?.cancel()
         settleTask = nil
 
         let sorted = session.parts.sorted { $0.creationDate < $1.creationDate }

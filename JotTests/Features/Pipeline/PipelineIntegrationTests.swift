@@ -33,6 +33,15 @@ struct PipelineIntegrationTests {
         return url
     }
 
+    /// Find a single output-folder name ending with `suffix`. Returns nil
+    /// if no folder matches; used by the rename tests where the leading
+    /// timestamp prefix is non-deterministic (depends on the file's
+    /// creation time) but the meeting-name tail is fixed.
+    private static func findOutputFolder(under output: URL, endingWith suffix: String) throws -> String? {
+        let entries = try FileManager.default.contentsOfDirectory(atPath: output.path(percentEncoded: false))
+        return entries.first { $0.hasSuffix(suffix) }
+    }
+
     private static func okResponse(body: String) -> (HTTPURLResponse, Data) {
         let r = HTTPURLResponse(url: baseURL, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
         return (r, Data(body.utf8))
@@ -356,18 +365,24 @@ struct PipelineIntegrationTests {
         }
         #expect(got, "Expected a success audit entry. Entries: \(capture.entries.map(\.message))")
 
-        // Meeting folder + transcript named after the meeting, not the AH
-        // timestamp.
-        let meeting = output.appendingPathComponent("Standup", isDirectory: true)
-        #expect(FileManager.default.fileExists(atPath: meeting.path(percentEncoded: false)))
+        // Meeting folder + transcript named after the meeting, prefixed
+        // with the recording-start timestamp for chronological sort order
+        // in Finder.
+        let folderName = try #require(
+            try Self.findOutputFolder(under: output, endingWith: " - Standup"),
+            "Expected an output folder ending with ' - Standup'"
+        )
+        let meeting = output.appendingPathComponent(folderName, isDirectory: true)
         #expect(FileManager.default.fileExists(
-            atPath: meeting.appendingPathComponent("Standup.mp3").path(percentEncoded: false)
+            atPath: meeting.appendingPathComponent("\(folderName).mp3").path(percentEncoded: false)
         ))
         let transcript = try String(
-            contentsOf: meeting.appendingPathComponent("Standup.txt"),
+            contentsOf: meeting.appendingPathComponent("\(folderName).txt"),
             encoding: .utf8
         )
         #expect(transcript == "the standup notes")
+        // Folder name has the documented prefix shape.
+        #expect(folderName.range(of: #"^\d{4}\.\d{2}\.\d{2} - \d{2}\.\d{2} - Standup$"#, options: .regularExpression) != nil)
 
         // The pending entry was consumed.
         #expect(store.pending == nil)
@@ -504,10 +519,14 @@ struct PipelineIntegrationTests {
         #expect(got)
 
         // Both `/` and `:` became `-`, then the consecutive hyphens collapsed.
-        let meeting = output.appendingPathComponent("Client-Project-Q3", isDirectory: true)
-        #expect(FileManager.default.fileExists(atPath: meeting.path(percentEncoded: false)))
+        // The timestamp prefix sits ahead of the sanitized name.
+        let folderName = try #require(
+            try Self.findOutputFolder(under: output, endingWith: " - Client-Project-Q3"),
+            "Expected an output folder ending with ' - Client-Project-Q3'"
+        )
+        let meeting = output.appendingPathComponent(folderName, isDirectory: true)
         #expect(FileManager.default.fileExists(
-            atPath: meeting.appendingPathComponent("Client-Project-Q3.mp3").path(percentEncoded: false)
+            atPath: meeting.appendingPathComponent("\(folderName).mp3").path(percentEncoded: false)
         ))
     }
 

@@ -216,13 +216,21 @@ actor ProcessingPipeline {
     /// URL on success, or nil if no rename happened (no snapshot, sanitized
     /// name empty, or the actual `moveItem` failed). Never throws — rename
     /// is strictly best-effort and must not block transcription.
+    ///
+    /// The new basename is prefixed with the file's creation timestamp in
+    /// `yyyy.MM.dd - HH.mm` form so meeting folders sort chronologically
+    /// by name in Finder. The downstream `FileOrganizer` derives the
+    /// folder + transcript filenames from the audio's basename, so the
+    /// timestamp propagates through automatically.
     private func renameIfNeeded(_ url: URL, with snapshot: MeetingContextSnapshot?) async -> URL? {
         guard let snapshot else { return nil }
         guard let safeName = MeetingContextStore.sanitizedFilenameComponent(snapshot.meetingName) else { return nil }
 
+        let timestamp = Self.folderTimestamp(for: fileCreationDate(of: url) ?? Date())
+        let prefixedName = "\(timestamp) - \(safeName)"
         let parent = url.deletingLastPathComponent()
         let ext = url.pathExtension
-        let target = uniqueAudioURL(under: parent, baseName: safeName, ext: ext)
+        let target = uniqueAudioURL(under: parent, baseName: prefixedName, ext: ext)
 
         // Pre-register the new path in the ledger so the FS event the move
         // triggers doesn't cause the watcher to re-emit the file. The
@@ -259,6 +267,22 @@ actor ProcessingPipeline {
     private func fileCreationDate(of url: URL) -> Date? {
         let values = try? url.resourceValues(forKeys: [.creationDateKey])
         return values?.creationDate
+    }
+
+    /// `yyyy.MM.dd - HH.mm` in local time — the prefix that gives meeting
+    /// folders chronological sort order in Finder. Uses `en_US_POSIX` to
+    /// keep the format locale-independent; uses the current `TimeZone` so
+    /// the prefix matches the user's wall-clock view of the meeting.
+    private static let timestampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy.MM.dd - HH.mm"
+        return f
+    }()
+
+    nonisolated static func folderTimestamp(for date: Date) -> String {
+        timestampFormatter.string(from: date)
     }
 
     /// Pick a free URL of the form `<parent>/<baseName>.<ext>`, suffixing

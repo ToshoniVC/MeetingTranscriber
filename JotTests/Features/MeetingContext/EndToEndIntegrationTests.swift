@@ -133,18 +133,24 @@ struct AddContextEndToEndIntegrationTests {
         }
         #expect(succeeded, "Pipeline did not produce a success entry: \(capture.entries.map(\.message))")
 
-        // 6a. Renamed-and-filed meeting folder + transcript.
-        let meeting = output.appendingPathComponent("Standup", isDirectory: true)
-        #expect(FileManager.default.fileExists(atPath: meeting.path(percentEncoded: false)))
+        // 6a. Renamed-and-filed meeting folder + transcript. The folder
+        // name is `<yyyy.MM.dd - HH.mm> - Standup` so meetings sort
+        // chronologically in Finder.
+        let entries = try FileManager.default.contentsOfDirectory(atPath: output.path(percentEncoded: false))
+        let folderName = try #require(
+            entries.first { $0.hasSuffix(" - Standup") },
+            "Expected output folder ending with ' - Standup', got \(entries)"
+        )
+        let meeting = output.appendingPathComponent(folderName, isDirectory: true)
         let transcriptText = try String(
-            contentsOf: meeting.appendingPathComponent("Standup.txt"),
+            contentsOf: meeting.appendingPathComponent("\(folderName).txt"),
             encoding: .utf8
         )
         #expect(transcriptText == "the standup transcript")
 
         // 6b. Audio was moved into the meeting folder.
         #expect(FileManager.default.fileExists(
-            atPath: meeting.appendingPathComponent("Standup.mp3").path(percentEncoded: false)
+            atPath: meeting.appendingPathComponent("\(folderName).mp3").path(percentEncoded: false)
         ))
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: watch.path(percentEncoded: false))
         #expect(leftovers.isEmpty)

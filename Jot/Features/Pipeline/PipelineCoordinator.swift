@@ -22,6 +22,7 @@ final class PipelineCoordinator {
     private let settings: AppSettings
     private let auditLog: AuditLogStore
     private let menuBar: MenuBarController
+    private let meetingNameStore: MeetingNameStore?
 
     /// Current pipeline (if running). Nil between starts.
     private var pipeline: ProcessingPipeline?
@@ -40,11 +41,13 @@ final class PipelineCoordinator {
     init(
         settings: AppSettings,
         auditLog: AuditLogStore,
-        menuBar: MenuBarController
+        menuBar: MenuBarController,
+        meetingNameStore: MeetingNameStore? = nil
     ) {
         self.settings = settings
         self.auditLog = auditLog
         self.menuBar = menuBar
+        self.meetingNameStore = meetingNameStore
     }
 
     // MARK: - Public API
@@ -137,6 +140,16 @@ final class PipelineCoordinator {
 
         do {
             let watcher = try await FolderWatcher(folderURL: config.watchFolder)
+            let consumeMeetingName: (@Sendable (Date) async -> String?)?
+            if let store = meetingNameStore {
+                consumeMeetingName = { creationDate in
+                    await MainActor.run {
+                        store.consume(forFileCreatedAt: creationDate)
+                    }
+                }
+            } else {
+                consumeMeetingName = nil
+            }
             let pipeline = ProcessingPipeline(
                 config: config,
                 watcher: watcher,
@@ -149,7 +162,8 @@ final class PipelineCoordinator {
                     Task { @MainActor in
                         self?.auditLog.append(entry)
                     }
-                }
+                },
+                consumeMeetingName: consumeMeetingName
             )
             try await pipeline.start()
             self.pipeline = pipeline

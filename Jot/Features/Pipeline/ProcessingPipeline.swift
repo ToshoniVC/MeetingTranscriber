@@ -48,6 +48,13 @@ actor ProcessingPipeline {
     private let onStateChange: @Sendable (PipelineState) -> Void
     private let onAuditEntry: @Sendable (AuditLogEntry) -> Void
 
+    /// Optional bridge to `MeetingNameStore`. Given a file's creation date,
+    /// returns the meeting name the user typed when this recording started
+    /// — but only if that creation date is plausibly inside Jot's recording
+    /// window (see `MeetingNameStore` for the time-window check). Nil for
+    /// tests / harnesses that don't care about renaming.
+    private let consumeMeetingName: (@Sendable (Date) async -> String?)?
+
     private var running = false
     private var consumerTask: Task<Void, Never>?
 
@@ -57,7 +64,8 @@ actor ProcessingPipeline {
         transcriptionClient: TranscriptionClient = TranscriptionClient(),
         fileOrganizer: FileOrganizer = FileOrganizer(),
         onStateChange: @escaping @Sendable (PipelineState) -> Void,
-        onAuditEntry: @escaping @Sendable (AuditLogEntry) -> Void
+        onAuditEntry: @escaping @Sendable (AuditLogEntry) -> Void,
+        consumeMeetingName: (@Sendable (Date) async -> String?)? = nil
     ) {
         self.config = config
         self.watcher = watcher
@@ -65,6 +73,7 @@ actor ProcessingPipeline {
         self.fileOrganizer = fileOrganizer
         self.onStateChange = onStateChange
         self.onAuditEntry = onAuditEntry
+        self.consumeMeetingName = consumeMeetingName
     }
 
     // MARK: - Lifecycle
@@ -116,10 +125,19 @@ actor ProcessingPipeline {
         let startTime = Date()
         onStateChange(.processing(url))
 
+        // 0. If this file's creation date falls inside an active Jot-driven
+        // recording window, rename it to the meeting name the user typed.
+        // The watcher hands us timestamp-named files from AH regardless of
+        // who started the session — the time-window guard in
+        // `MeetingNameStore` ensures we only rename files we know are ours.
+        // Best-effort: a failed rename falls back to the original URL so
+        // transcription still happens.
+        let workingURL = await renameIfMeetingNamePending(url) ?? url
+
         do {
             // 1. Transcribe.
             let transcript = try await transcriptionClient.transcribe(
-                audio: url,
+                audio: workingURL,
                 baseURL: config.apiBaseURL,
                 model: config.model,
                 apiKey: config.apiKey
@@ -127,7 +145,7 @@ actor ProcessingPipeline {
 
             // 2. Organize: per-meeting folder + transcript + move audio.
             let meetingFolder = try await fileOrganizer.organize(
-                audio: url,
+                audio: workingURL,
                 transcript: transcript,
                 outputRoot: config.outputFolder
             )
@@ -138,13 +156,13 @@ actor ProcessingPipeline {
             // sitting in the Watch Folder (prevents double-processing on a
             // relaunch), but now the file has been moved out and the entry
             // is moot.
-            await watcher.forget(url)
+            await watcher.forget(workingURL)
 
             // 4. Log + reset state.
             let ms = Int(Date().timeIntervalSince(startTime) * 1000)
             onAuditEntry(.init(
                 kind: .success,
-                sourcePath: url.path(percentEncoded: false),
+                sourcePath: workingURL.path(percentEncoded: false),
                 message: "Transcribed and filed → \(meetingFolder.lastPathComponent)",
                 durationMs: ms,
                 retryable: false
@@ -152,15 +170,85 @@ actor ProcessingPipeline {
             onStateChange(.idle)
 
         } catch let error as TranscriptionError {
-            recordFailure(url: url, message: error.userFacingMessage, startedAt: startTime)
+            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime)
         } catch let error as FileOrganizerError {
-            recordFailure(url: url, message: error.userFacingMessage, startedAt: startTime)
+            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime)
         } catch is CancellationError {
             // Shutdown happened mid-flight — don't log as failure.
             return
         } catch {
-            recordFailure(url: url, message: error.localizedDescription, startedAt: startTime)
+            recordFailure(url: workingURL, message: error.localizedDescription, startedAt: startTime)
         }
+    }
+
+    /// Try to rename `url` to the meeting name the user typed at the start
+    /// prompt. Returns the new URL on success, or nil if no rename happened
+    /// (no pending meeting, creation date outside the window, sanitized name
+    /// empty, or the actual `moveItem` failed). Never throws — rename is
+    /// strictly best-effort and must not block transcription.
+    private func renameIfMeetingNamePending(_ url: URL) async -> URL? {
+        guard let consume = consumeMeetingName else { return nil }
+        guard let creationDate = fileCreationDate(of: url) else { return nil }
+        guard let rawName = await consume(creationDate) else { return nil }
+        guard let safeName = MeetingNameStore.sanitizedFilenameComponent(rawName) else { return nil }
+
+        let parent = url.deletingLastPathComponent()
+        let ext = url.pathExtension
+        let target = uniqueAudioURL(under: parent, baseName: safeName, ext: ext)
+
+        // Pre-register the new path in the ledger so the FS event the move
+        // triggers doesn't cause the watcher to re-emit the file. The
+        // detector also needs `stableDuration` of unchanged state before
+        // it'd emit anyway, so this is belt-and-braces.
+        await watcher.preRecord(target)
+        do {
+            try FileManager.default.moveItem(at: url, to: target)
+        } catch {
+            // Rollback the pre-registration so a future legitimately-new
+            // file at this path can still be picked up.
+            await watcher.forget(target)
+            Log.pipeline.warning("Meeting-name rename failed for \(url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+
+        // Old path is gone. Drop its ledger + detector entries so we don't
+        // hold a stale record across restarts.
+        await watcher.forget(url)
+
+        onAuditEntry(.init(
+            kind: .info,
+            sourcePath: target.path(percentEncoded: false),
+            message: "Renamed \(url.lastPathComponent) → \(target.lastPathComponent) (meeting name)"
+        ))
+        Log.pipeline.info("Renamed \(url.lastPathComponent, privacy: .public) → \(target.lastPathComponent, privacy: .public)")
+        return target
+    }
+
+    /// Inode creation timestamp via `URLResourceValues`. Approximates when
+    /// Audio Hijack opened the file for writing — i.e., when recording
+    /// began — which is exactly what `MeetingNameStore` wants to compare
+    /// against its `startedAt`.
+    private func fileCreationDate(of url: URL) -> Date? {
+        let values = try? url.resourceValues(forKeys: [.creationDateKey])
+        return values?.creationDate
+    }
+
+    /// Pick a free URL of the form `<parent>/<baseName>.<ext>`, suffixing
+    /// `-2`, `-3`, … on collision. Mirrors `FileOrganizer.uniqueFolderURL`
+    /// — same shape, same fallback, applied to files rather than folders.
+    private func uniqueAudioURL(under parent: URL, baseName: String, ext: String) -> URL {
+        let extSuffix = ext.isEmpty ? "" : ".\(ext)"
+        let direct = parent.appendingPathComponent("\(baseName)\(extSuffix)")
+        if !FileManager.default.fileExists(atPath: direct.path(percentEncoded: false)) {
+            return direct
+        }
+        for suffix in 2...999 {
+            let candidate = parent.appendingPathComponent("\(baseName)-\(suffix)\(extSuffix)")
+            if !FileManager.default.fileExists(atPath: candidate.path(percentEncoded: false)) {
+                return candidate
+            }
+        }
+        return parent.appendingPathComponent("\(baseName)-\(UUID().uuidString.prefix(8))\(extSuffix)")
     }
 
     private func recordFailure(url: URL, message: String, startedAt: Date) {

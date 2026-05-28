@@ -16,6 +16,12 @@ xcuserdata/
 Packages/
 Package.resolved
 
+# Python (scripts/)
+.venv/
+__pycache__/
+*.pyc
+.env
+
 # Generated Xcode project (regenerated from project.yml via xcodegen)
 # Kept committed for ease of clone-and-build, but the canonical source is project.yml.
 # If you want to gitignore it instead, uncomment the next line:

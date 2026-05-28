@@ -43,7 +43,7 @@
     <key>SUFeedURL</key>
     <string>https://toshonivc.github.io/MeetingTranscriber/appcast.xml</string>
     <key>SUPublicEDKey</key>
-    <string>REPLACE_WITH_PUBLIC_ED_KEY_FROM_GENERATE_KEYS</string>
+    <string>B+aC31pXtGnl8bvJIRj/nhj4uOdmDTnM6viGp538XAg=</string>
     <key>SUEnableAutomaticChecks</key>
     <true/>
     <key>SUScheduledCheckInterval</key>

@@ -40,9 +40,18 @@ struct ProcessingPipelineClaudeCodeTests {
         return url
     }
 
-    private static func okResponse(body: String) -> (HTTPURLResponse, Data) {
-        let r = HTTPURLResponse(url: baseURL, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
-        return (r, Data(body.utf8))
+    /// verbose_json transcription stub. See PipelineIntegrationTests for
+    /// the same shape — `TranscriptionClient` decodes JSON since v0.4.2.
+    private static func okResponse(body text: String) -> (HTTPURLResponse, Data) {
+        let r = HTTPURLResponse(url: baseURL, statusCode: 200, httpVersion: "HTTP/1.1",
+                                headerFields: ["Content-Type": "application/json"])!
+        let payload: [String: Any] = [
+            "task": "transcribe", "language": "english", "duration": 1.0,
+            "text": text,
+            "segments": [["id": 0, "start": 0.0, "end": 1.0, "text": text]]
+        ]
+        let body = try! JSONSerialization.data(withJSONObject: payload, options: [])
+        return (r, body)
     }
 
     @MainActor

@@ -120,7 +120,7 @@ struct TranscriptionRequestTests {
     }
 
     @Test
-    func body_containsResponseFormatTextField() throws {
+    func body_containsResponseFormatVerboseJsonField() throws {
         let audio = Self.makeAudio(content: "X")
         defer { try? FileManager.default.removeItem(at: audio) }
 
@@ -133,10 +133,9 @@ struct TranscriptionRequestTests {
         let body = try Data(contentsOf: request.bodyFileURL)
         let text = String(data: body, encoding: .utf8) ?? ""
         #expect(text.contains("Content-Disposition: form-data; name=\"response_format\""))
-        // The literal "text" appears as the field VALUE on its own line; we
-        // can't just substring-match "text" because the body contains the
-        // word in headers too. Look for the value line specifically.
-        #expect(text.range(of: "name=\"response_format\"\r\n\r\ntext\r\n") != nil)
+        // verbose_json is sent so the client can read `duration` +
+        // per-segment `end` and surface the truncation gap as a log line.
+        #expect(text.range(of: "name=\"response_format\"\r\n\r\nverbose_json\r\n") != nil)
     }
 
     @Test

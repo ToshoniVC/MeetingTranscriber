@@ -22,7 +22,10 @@ struct TranscriptionRequest {
     /// endpoint. Fields per OpenAI's `/audio/transcriptions` spec:
     ///   - `file` (audio binary)
     ///   - `model` (string)
-    ///   - `response_format` (we force `text` — plain transcript, no JSON)
+    ///   - `response_format` (we force `verbose_json` so the client gets
+    ///     `duration` + per-segment `end` timestamps alongside `text` —
+    ///     lets us detect Whisper stopping short of the audio's actual
+    ///     length without changing what downstream callers consume.)
     ///
     /// Auth is a `Bearer` token in the `Authorization` header.
     ///
@@ -100,10 +103,14 @@ struct TranscriptionRequest {
         try write("Content-Disposition: form-data; name=\"model\"\r\n\r\n")
         try write("\(model)\r\n")
 
-        // --- response_format field (force plain text) ---
+        // --- response_format field (force verbose_json) ---
+        // verbose_json returns `{ task, language, duration, text, segments }`.
+        // We need `duration` + the last segment's `end` to diagnose Whisper
+        // truncating long meetings; the client extracts `text` for the
+        // existing String return so downstream is unchanged.
         try write("--\(boundary)\r\n")
         try write("Content-Disposition: form-data; name=\"response_format\"\r\n\r\n")
-        try write("text\r\n")
+        try write("verbose_json\r\n")
 
         // --- prompt field (optional) ---
         // OpenAI Whisper's documented `prompt` parameter (up to 224 tokens).

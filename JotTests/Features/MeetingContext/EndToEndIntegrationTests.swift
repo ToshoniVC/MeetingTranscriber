@@ -14,6 +14,19 @@ struct AddContextEndToEndIntegrationTests {
 
     private static let baseURL = URL(string: "https://api.test/v1/audio/transcriptions")!
 
+    /// verbose_json transcription stub — `TranscriptionClient` decodes
+    /// JSON since v0.4.2, so the e2e mock has to look like the real API.
+    private static func transcriptionResponse(_ text: String) -> (HTTPURLResponse, Data) {
+        let r = HTTPURLResponse(url: baseURL, statusCode: 200, httpVersion: "HTTP/1.1",
+                                headerFields: ["Content-Type": "application/json"])!
+        let payload: [String: Any] = [
+            "task": "transcribe", "language": "english", "duration": 1.0,
+            "text": text,
+            "segments": [["id": 0, "start": 0.0, "end": 1.0, "text": text]]
+        ]
+        return (r, try! JSONSerialization.data(withJSONObject: payload, options: []))
+    }
+
     private static func makeFolders() throws -> (watch: URL, output: URL, ledger: ProcessedFilesLedger) {
         let watch = FileManager.default.temporaryDirectory
             .appendingPathComponent("jot-e2e-watch-\(UUID().uuidString)")
@@ -51,10 +64,7 @@ struct AddContextEndToEndIntegrationTests {
     func fullFlow_orgConfiguredMeetingRecorded_endsWithContextMDAndOrgInAudit() async throws {
         MockURLProtocol.reset()
         defer { MockURLProtocol.reset() }
-        MockURLProtocol.responder = { _ in
-            let resp = HTTPURLResponse(url: Self.baseURL, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
-            return (resp, Data("the standup transcript".utf8))
-        }
+        MockURLProtocol.responder = { _ in Self.transcriptionResponse("the standup transcript") }
 
         let (watch, output, ledger) = try Self.makeFolders()
         defer {
@@ -181,10 +191,7 @@ struct AddContextEndToEndIntegrationTests {
     func legacyFlow_noSnapshot_pipelineBehavesAsBefore() async throws {
         MockURLProtocol.reset()
         defer { MockURLProtocol.reset() }
-        MockURLProtocol.responder = { _ in
-            let resp = HTTPURLResponse(url: Self.baseURL, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
-            return (resp, Data("legacy".utf8))
-        }
+        MockURLProtocol.responder = { _ in Self.transcriptionResponse("legacy") }
 
         let (watch, output, ledger) = try Self.makeFolders()
         defer {

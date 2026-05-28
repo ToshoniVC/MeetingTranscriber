@@ -22,12 +22,31 @@ struct TranscriptionClientIntegrationTests {
         return url
     }
 
-    private static func okResponse(body: String) -> (HTTPURLResponse, Data) {
+    /// Build a `verbose_json` success response carrying `text` as its
+    /// transcript. The client now decodes JSON (v0.4.2) rather than reading
+    /// the body as plain text, so test mocks have to look like the real
+    /// API: a `text` field, plus optional `duration` + `segments[]` we use
+    /// for the truncation-gap diagnostic.
+    private static func okResponse(
+        body text: String,
+        duration: Double = 1.0,
+        lastSegmentEnd: Double = 1.0
+    ) -> (HTTPURLResponse, Data) {
         let response = HTTPURLResponse(
             url: baseURL, statusCode: 200,
-            httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "text/plain"]
+            httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]
         )!
-        return (response, Data(body.utf8))
+        let payload: [String: Any] = [
+            "task": "transcribe",
+            "language": "english",
+            "duration": duration,
+            "text": text,
+            "segments": [
+                ["id": 0, "start": 0.0, "end": lastSegmentEnd, "text": text]
+            ]
+        ]
+        let body = try! JSONSerialization.data(withJSONObject: payload, options: [])
+        return (response, body)
     }
 
     private static func errorResponse(status: Int, body: String = "") -> (HTTPURLResponse, Data) {
@@ -80,6 +99,63 @@ struct TranscriptionClientIntegrationTests {
         #expect(firstRequest.value(forHTTPHeaderField: "Authorization") == "Bearer sk-magic-key")
         #expect(firstRequest.httpMethod == "POST")
         #expect(firstRequest.url == Self.baseURL)
+    }
+
+    @Test
+    func truncatedResponse_stillReturnsExtractedText() async throws {
+        // verbose_json case where Whisper stopped 13 minutes short of the
+        // audio's 15-minute duration — the diagnostic log line records the
+        // gap, but the client still returns whatever text the API gave us
+        // so downstream organize/Notion paths run normally.
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        MockURLProtocol.responder = { _ in
+            Self.okResponse(
+                body: "partial meeting transcript",
+                duration: 900,
+                lastSegmentEnd: 120
+            )
+        }
+
+        let audio = Self.makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let client = TranscriptionClient(session: MockURLSession.make())
+        let text = try await client.transcribe(
+            audio: audio,
+            baseURL: Self.baseURL,
+            model: "whisper-1",
+            apiKey: "sk-test"
+        )
+        #expect(text == "partial meeting transcript")
+    }
+
+    @Test
+    func malformedJsonBody_throwsMalformedResponse() async {
+        // Server returns a 200 with a non-JSON body (e.g., an HTML error
+        // page that slipped past the status check). The client decodes
+        // verbose_json now, so this is a `malformedResponse`, not silently
+        // accepted as the transcript.
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        MockURLProtocol.responder = { _ in
+            let response = HTTPURLResponse(
+                url: Self.baseURL, statusCode: 200,
+                httpVersion: "HTTP/1.1", headerFields: nil
+            )!
+            return (response, Data("not json at all".utf8))
+        }
+
+        let audio = Self.makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let client = TranscriptionClient(session: MockURLSession.make())
+        await #expect(throws: TranscriptionError.malformedResponse) {
+            _ = try await client.transcribe(
+                audio: audio, baseURL: Self.baseURL,
+                model: "m", apiKey: "sk"
+            )
+        }
     }
 
     // MARK: - Error mapping

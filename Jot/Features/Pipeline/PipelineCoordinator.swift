@@ -102,10 +102,14 @@ final class PipelineCoordinator {
                 _ = settings.modelString
                 _ = settings.notionEnabled
                 _ = settings.notionDatabaseId
-                // apiKey and notionToken are Keychain-backed (not
-                // observable). Token changes require the user to flip the
-                // notionEnabled toggle off+on, or quit/relaunch — same
-                // shape as the existing apiKey story.
+                _ = settings.claudeCodeNotesEnabled
+                _ = settings.claudeCodeEndpoint
+                _ = settings.claudeCodeExtraText
+                // apiKey, notionToken, and claudeCodeToken are
+                // Keychain-backed (not observable). Token changes
+                // require the user to flip the corresponding toggle
+                // off+on, or quit/relaunch — same shape as the
+                // existing apiKey story.
             } onChange: {
                 continuation.resume()
             }
@@ -153,6 +157,7 @@ final class PipelineCoordinator {
                 consumeMeetingContext = nil
             }
             let notionMode = makeNotionMode()
+            let claudeCodeMode = makeClaudeCodeMode()
             let auditLog = self.auditLog
             let pipeline = ProcessingPipeline(
                 config: config,
@@ -172,6 +177,12 @@ final class PipelineCoordinator {
                 onNotionStatusChange: { entryId, status in
                     Task { @MainActor in
                         auditLog.updateNotionStatus(status, forEntry: entryId)
+                    }
+                },
+                claudeCodeMode: claudeCodeMode,
+                onClaudeCodeStatusChange: { entryId, status in
+                    Task { @MainActor in
+                        auditLog.updateClaudeCodeStatus(status, forEntry: entryId)
                     }
                 }
             )
@@ -247,6 +258,22 @@ final class PipelineCoordinator {
             return .skip(reason: .misconfigured)
         case .ready(let config):
             return .attempt(config: config, writer: NotionClient())
+        }
+    }
+
+    /// Decide whether to fire the post-Notion Claude Code routine per
+    /// meeting. Mirrors `makeNotionMode()`: `.ready` →
+    /// `.attempt(config:firing:)` with a fresh `ClaudeCodeRoutineClient`;
+    /// `.disabled` / `.misconfigured` → `.skip(reason)` so the audit row
+    /// records why no notes were generated.
+    private func makeClaudeCodeMode() -> ClaudeCodePipelineMode {
+        switch ClaudeCodeValidation.validate(settings) {
+        case .disabled:
+            return .skip(reason: .disabled)
+        case .misconfigured:
+            return .skip(reason: .misconfigured)
+        case .ready(let config):
+            return .attempt(config: config, firing: ClaudeCodeRoutineClient())
         }
     }
 

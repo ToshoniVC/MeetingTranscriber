@@ -72,7 +72,8 @@ final class AuditLogStore {
             retryable: false,
             contextAttached: original.contextAttached,
             organizationName: original.organizationName,
-            notionStatus: original.notionStatus
+            notionStatus: original.notionStatus,
+            claudeCodeStatus: original.claudeCodeStatus
         )
         persist()
     }
@@ -84,6 +85,16 @@ final class AuditLogStore {
     func updateNotionStatus(_ status: NotionStatus?, forEntry id: UUID) {
         guard let idx = entries.firstIndex(where: { $0.id == id }) else { return }
         entries[idx] = entries[idx].withNotionStatus(status)
+        persist()
+    }
+
+    /// Replace the `claudeCodeStatus` of the entry with `id`. Called by
+    /// the Pipeline's post-Notion Claude Code task once the routine fire
+    /// completes (success or failure). No-op if no entry matches — the
+    /// row may have been cleared while the request was in flight.
+    func updateClaudeCodeStatus(_ status: ClaudeCodeRoutineStatus?, forEntry id: UUID) {
+        guard let idx = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[idx] = entries[idx].withClaudeCodeStatus(status)
         persist()
     }
 

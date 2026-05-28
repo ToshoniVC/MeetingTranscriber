@@ -23,6 +23,8 @@ struct SettingsView: View {
                 Divider()
                 NotionSection()
                 Divider()
+                ClaudeCodeSection()
+                Divider()
                 SystemSection()
             }
             .padding(24)

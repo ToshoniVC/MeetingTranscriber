@@ -99,6 +99,31 @@ final class AppSettings {
         didSet { defaults.set(notionDatabaseId, forKey: Keys.notionDatabaseId) }
     }
 
+    /// Master toggle for the Claude Code post-Notion routine trigger.
+    /// When `false` (the default) Jot never fires the routine, even if
+    /// the endpoint/token below are configured. Independent of
+    /// `notionEnabled` — but `ClaudeCodeValidation` still requires Notion
+    /// to be configured, because the routine has nothing to do without a
+    /// Notion page to write into.
+    var claudeCodeNotesEnabled: Bool {
+        didSet { defaults.set(claudeCodeNotesEnabled, forKey: Keys.claudeCodeNotesEnabled) }
+    }
+
+    /// Fully-qualified Claude Code routine fire endpoint URL. Pattern:
+    /// `https://api.anthropic.com/v1/claude_code/routines/<trigger_id>/fire`.
+    /// Stored verbatim; `ClaudeCodeValidation` parses it.
+    var claudeCodeEndpoint: String {
+        didSet { defaults.set(claudeCodeEndpoint, forKey: Keys.claudeCodeEndpoint) }
+    }
+
+    /// Optional instruction text appended to every routine fire as the
+    /// JSON body's `text` field. Jot also appends the Notion page URL
+    /// onto this string at fire-time so the routine knows which page
+    /// to write into.
+    var claudeCodeExtraText: String {
+        didSet { defaults.set(claudeCodeExtraText, forKey: Keys.claudeCodeExtraText) }
+    }
+
     // MARK: - Keychain-backed properties
 
     /// API key for the transcription endpoint. Round-trips through Keychain
@@ -124,6 +149,21 @@ final class AppSettings {
                 try? keychain.setString(newValue, forKey: Self.notionTokenAccount)
             } else {
                 try? keychain.deleteString(forKey: Self.notionTokenAccount)
+            }
+        }
+    }
+
+    /// Claude Code routine bearer token. Sent as
+    /// `Authorization: Bearer <token>` to the fire endpoint. Kept in
+    /// its own Keychain entry so it's independently rotatable from
+    /// `apiKey` and `notionToken`. Setting `nil` or empty deletes.
+    var claudeCodeToken: String? {
+        get { keychain.getString(forKey: Self.claudeCodeTokenAccount) }
+        set {
+            if let newValue, !newValue.isEmpty {
+                try? keychain.setString(newValue, forKey: Self.claudeCodeTokenAccount)
+            } else {
+                try? keychain.deleteString(forKey: Self.claudeCodeTokenAccount)
             }
         }
     }
@@ -165,6 +205,9 @@ final class AppSettings {
         self.launchOnStartup = defaults.bool(forKey: Keys.launchOnStartup)
         self.notionEnabled = defaults.bool(forKey: Keys.notionEnabled)
         self.notionDatabaseId = defaults.string(forKey: Keys.notionDatabaseId) ?? ""
+        self.claudeCodeNotesEnabled = defaults.bool(forKey: Keys.claudeCodeNotesEnabled)
+        self.claudeCodeEndpoint = defaults.string(forKey: Keys.claudeCodeEndpoint) ?? ""
+        self.claudeCodeExtraText = defaults.string(forKey: Keys.claudeCodeExtraText) ?? ""
     }
 
     // MARK: - UserDefaults keys (centralized to avoid string typos)
@@ -182,6 +225,9 @@ final class AppSettings {
         static let launchOnStartup     = "jot.settings.launchOnStartup"
         static let notionEnabled       = "jot.settings.notionEnabled"
         static let notionDatabaseId    = "jot.settings.notionDatabaseId"
+        static let claudeCodeNotesEnabled = "jot.settings.claudeCodeNotesEnabled"
+        static let claudeCodeEndpoint     = "jot.settings.claudeCodeEndpoint"
+        static let claudeCodeExtraText    = "jot.settings.claudeCodeExtraText"
     }
 
     /// Keychain `account` for the API key entry. The `service` is set in `init`.
@@ -190,4 +236,9 @@ final class AppSettings {
     /// Keychain `account` for the Notion integration token. Separate from
     /// `apiKeyAccount` so the two secrets are independently rotatable.
     static let notionTokenAccount = "notion_token"
+
+    /// Keychain `account` for the Claude Code routine bearer token.
+    /// Separate from `apiKeyAccount` and `notionTokenAccount` so all
+    /// three secrets are independently rotatable.
+    static let claudeCodeTokenAccount = "claude_code_token"
 }

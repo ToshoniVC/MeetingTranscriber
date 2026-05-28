@@ -47,19 +47,20 @@ struct AuditLogEntryTests {
         #expect(decoded == entries)
     }
 
-    // MARK: - Schema v3 (Notion meeting creation)
+    // MARK: - Schema v4 (Claude Code routine trigger)
 
     @Test
-    func newEntry_defaultsToSchemaV3() {
+    func newEntry_defaultsToSchemaV4() {
         let entry = AuditLogEntry(kind: .info, sourcePath: "/a", message: "x")
-        #expect(entry.schemaVersion == 3)
+        #expect(entry.schemaVersion == 4)
         #expect(entry.contextAttached == nil)
         #expect(entry.organizationName == nil)
         #expect(entry.notionStatus == nil)
+        #expect(entry.claudeCodeStatus == nil)
     }
 
     @Test
-    func roundTrip_preservesAddContextV2Fields_onV3Entry() throws {
+    func roundTrip_preservesAddContextV2Fields_onV4Entry() throws {
         let original = AuditLogEntry(
             kind: .success,
             sourcePath: "/tmp/x.mp3",
@@ -72,9 +73,84 @@ struct AuditLogEntryTests {
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(AuditLogEntry.self, from: data)
         #expect(decoded == original)
-        #expect(decoded.schemaVersion == 3)
+        #expect(decoded.schemaVersion == 4)
         #expect(decoded.contextAttached == true)
         #expect(decoded.organizationName == "Acme")
+    }
+
+    // MARK: - Schema v4 (claudeCodeStatus)
+
+    @Test
+    func roundTrip_preservesClaudeCodeStatus_fired() throws {
+        let original = AuditLogEntry(
+            kind: .success,
+            sourcePath: "/tmp/x.mp3",
+            message: "ok",
+            claudeCodeStatus: .fired
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(AuditLogEntry.self, from: data)
+        #expect(decoded == original)
+    }
+
+    @Test
+    func roundTrip_preservesClaudeCodeStatus_failed() throws {
+        let original = AuditLogEntry(
+            kind: .success,
+            sourcePath: "/tmp/x.mp3",
+            message: "ok",
+            claudeCodeStatus: .failed(message: "Claude Code rejected the request: invalid token")
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(AuditLogEntry.self, from: data)
+        #expect(decoded == original)
+    }
+
+    @Test
+    func roundTrip_preservesClaudeCodeStatus_skipped_allReasons() throws {
+        for reason in [
+            ClaudeCodeRoutineStatus.SkipReason.disabled,
+            .misconfigured,
+            .notionNotReady
+        ] {
+            let original = AuditLogEntry(
+                kind: .success,
+                sourcePath: "/tmp/x.mp3",
+                message: "ok",
+                claudeCodeStatus: .skipped(reason: reason)
+            )
+            let data = try JSONEncoder().encode(original)
+            let decoded = try JSONDecoder().decode(AuditLogEntry.self, from: data)
+            #expect(decoded == original)
+        }
+    }
+
+    /// A v3 JSON payload (with notionStatus but no claudeCodeStatus)
+    /// decodes cleanly with claudeCodeStatus = nil.
+    @Test
+    func decode_legacyV3Payload_leavesClaudeCodeStatusNil() throws {
+        let legacyJSON = """
+        {
+            "id": "44444444-4444-4444-4444-444444444444",
+            "timestamp": 1700000000.0,
+            "kind": "success",
+            "sourcePath": "/tmp/legacy.mp3",
+            "message": "v3 success",
+            "durationMs": 500,
+            "retryable": false,
+            "contextAttached": true,
+            "organizationName": "Acme",
+            "notionStatus": {"kind": "pending"},
+            "schemaVersion": 3
+        }
+        """
+        let decoded = try JSONDecoder().decode(
+            AuditLogEntry.self,
+            from: Data(legacyJSON.utf8)
+        )
+        #expect(decoded.schemaVersion == 3)
+        #expect(decoded.notionStatus == .pending)
+        #expect(decoded.claudeCodeStatus == nil)
     }
 
     @Test

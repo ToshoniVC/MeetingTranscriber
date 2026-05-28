@@ -106,7 +106,27 @@ final class MeetingContextStore {
     /// If `creationDate` falls within the active recording window, return
     /// the snapshot and clear the pending slot. Otherwise return nil and
     /// leave pending intact — a later file may still match.
+    ///
+    /// Legacy single-file path. The v0.4.1 batching path (introduced
+    /// alongside Audio Hijack's split-file recording) uses `peek` instead so
+    /// the snapshot survives across all parts of one meeting; `clearPending`
+    /// fires once when the batch is flushed.
     func consume(forFileCreatedAt creationDate: Date, now: Date = Date()) -> MeetingContextSnapshot? {
+        guard let snapshot = peek(forFileCreatedAt: creationDate, now: now) else {
+            return nil
+        }
+        pending = nil
+        return snapshot
+    }
+
+    /// Non-mutating window check — returns the active snapshot if
+    /// `creationDate` falls inside `[startedAt - slop, (stoppedAt ?? now) + slop]`,
+    /// otherwise nil. Used by the batch accumulator to identify split parts
+    /// without burning the snapshot on the first one.
+    ///
+    /// The "expired" branch (`now - startedAt > maxAge`) still clears
+    /// `pending` because a stale window is no longer valid for anything.
+    func peek(forFileCreatedAt creationDate: Date, now: Date = Date()) -> MeetingContextSnapshot? {
         guard let entry = pending else { return nil }
 
         if now.timeIntervalSince(entry.startedAt) > Self.maxAge {
@@ -119,9 +139,14 @@ final class MeetingContextStore {
         guard creationDate >= lowerBound, creationDate <= upperBound else {
             return nil
         }
-
-        pending = nil
         return entry.snapshot
+    }
+
+    /// Clear the pending entry. Called by the batch accumulator after it
+    /// emits a closed batch — the snapshot has done its job at that point.
+    /// Idempotent.
+    func clearPending() {
+        pending = nil
     }
 
     /// Clear any pending entry without consuming it. Used by callers that

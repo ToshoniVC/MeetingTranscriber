@@ -27,6 +27,14 @@ final class HotkeyCoordinator {
     private let organizations: OrganizationStore
     private let meetingContextStore: MeetingContextStore
 
+    /// Long-lived (app-lifetime) accumulator that buffers Audio-Hijack-
+    /// split files into one batch per meeting. We call its
+    /// `noteRecordingStarted` / `noteRecordingStopped` at the same sites
+    /// where we already stamp the `MeetingContextStore`, so the two
+    /// stores stay in lockstep on recording lifecycle. Nil in tests
+    /// that don't care about batching.
+    private let batchAccumulator: MeetingBatchAccumulator?
+
     /// One-line user-facing error if the most recent registration attempt
     /// failed (`HotkeyError.registrationFailed`). `nil` on success.
     private(set) var registrationError: String?
@@ -52,7 +60,8 @@ final class HotkeyCoordinator {
         menuBar: MenuBarController,
         auditLog: AuditLogStore,
         organizations: OrganizationStore,
-        meetingContextStore: MeetingContextStore
+        meetingContextStore: MeetingContextStore,
+        batchAccumulator: MeetingBatchAccumulator? = nil
     ) {
         self.settings = settings
         self.registrar = registrar
@@ -62,6 +71,7 @@ final class HotkeyCoordinator {
         self.auditLog = auditLog
         self.organizations = organizations
         self.meetingContextStore = meetingContextStore
+        self.batchAccumulator = batchAccumulator
     }
 
     /// Force-stop the active recording (the "Stop recording" menu-bar
@@ -72,7 +82,9 @@ final class HotkeyCoordinator {
                 stopShortcutName: settings.stopShortcutName
             )
             menuBar.setRecording(false)
-            meetingContextStore.recordStopped()
+            let stoppedAt = Date()
+            meetingContextStore.recordStopped(at: stoppedAt)
+            await batchAccumulator?.noteRecordingStopped(at: stoppedAt)
             auditLog.append(.init(
                 kind: .info,
                 sourcePath: "AudioHijack",
@@ -268,7 +280,9 @@ final class HotkeyCoordinator {
         if menuBar.isRecording {
             try await audioHijack.stopRecording(stopShortcutName: settings.stopShortcutName)
             menuBar.setRecording(false)
-            meetingContextStore.recordStopped()
+            let stoppedAt = Date()
+            meetingContextStore.recordStopped(at: stoppedAt)
+            await batchAccumulator?.noteRecordingStopped(at: stoppedAt)
             auditLog.append(.init(
                 kind: .info,
                 sourcePath: "AudioHijack",
@@ -332,6 +346,11 @@ final class HotkeyCoordinator {
             resolvedCompiledContext: compiled,
             at: startedAt
         )
+        // Mirror the snapshot into the batch accumulator so split files
+        // landing inside this window get grouped into one meeting.
+        if let snapshot = meetingContextStore.pending?.snapshot {
+            await batchAccumulator?.noteRecordingStarted(snapshot: snapshot, at: startedAt)
+        }
         menuBar.setRecording(true, meetingName: inputs.meetingName)
         let orgSuffix = org.map { " · \($0.name)" } ?? " · No Organization"
         auditLog.append(.init(

@@ -53,15 +53,8 @@ struct FileOrganizer: Sendable {
     }
 
     /// Organize a successfully-transcribed file into its meeting folder.
-    ///
-    /// - Parameters:
-    ///   - audio: source audio URL (currently in the Watch Folder). Will be
-    ///     moved into the new meeting folder.
-    ///   - transcript: text returned by `TranscriptionClient.transcribe(...)`.
-    ///   - outputRoot: the user-chosen Output Folder (already-resolved URL,
-    ///     not the bookmark Data). Caller is responsible for `startAccessing
-    ///     SecurityScopedResource()` lifetime.
-    /// - Returns: the absolute URL of the meeting folder just created.
+    /// Thin wrapper around the multi-part path — kept so legacy callers
+    /// (single-file pipeline path, tests) don't have to change.
     @discardableResult
     func organize(
         audio sourceURL: URL,
@@ -69,9 +62,50 @@ struct FileOrganizer: Sendable {
         context: String? = nil,
         outputRoot: URL
     ) async throws -> URL {
+        try await organize(
+            audioParts: [sourceURL],
+            transcript: transcript,
+            context: context,
+            outputRoot: outputRoot
+        )
+    }
+
+    /// Organize a successfully-transcribed meeting into its folder. Handles
+    /// both the single-file case (one URL in `audioParts`) and the
+    /// split-recording case (Audio Hijack's "split at X MB" produced
+    /// multiple parts that all belong to one meeting).
+    ///
+    /// - Parameters:
+    ///   - audioParts: source audio URLs in playback order. The first
+    ///     part's basename names the meeting folder + transcript. All
+    ///     parts are moved into the new folder under their existing
+    ///     filenames.
+    ///   - transcript: the combined transcript (caller concatenates per-part
+    ///     transcripts upstream — `FileOrganizer` is dumb about ordering).
+    ///   - outputRoot: the user-chosen Output Folder (already-resolved URL).
+    ///     Caller is responsible for `startAccessingSecurityScopedResource()`.
+    /// - Returns: the absolute URL of the meeting folder just created.
+    ///
+    /// **Rollback contract.** If *any* audio move fails after the transcript
+    /// has been written, we move any already-moved parts back to their
+    /// original locations, delete the transcript + context.md, and remove
+    /// the (now-empty) folder. The original audio files stay in the Watch
+    /// Folder so the user can retry.
+    @discardableResult
+    func organize(
+        audioParts: [URL],
+        transcript: String,
+        context: String? = nil,
+        outputRoot: URL
+    ) async throws -> URL {
         // 1. Validate inputs.
-        guard fileManager.fileExists(atPath: sourceURL.path(percentEncoded: false)) else {
-            throw FileOrganizerError.audioFileMissing(sourceURL)
+        guard let firstPart = audioParts.first else {
+            throw FileOrganizerError.audioFileMissing(outputRoot)
+        }
+        for part in audioParts {
+            guard fileManager.fileExists(atPath: part.path(percentEncoded: false)) else {
+                throw FileOrganizerError.audioFileMissing(part)
+            }
         }
         var isDir: ObjCBool = false
         guard fileManager.fileExists(atPath: outputRoot.path(percentEncoded: false), isDirectory: &isDir),
@@ -81,7 +115,7 @@ struct FileOrganizer: Sendable {
         }
 
         // 2. Pick the meeting folder URL (with collision suffix if needed).
-        let baseName = sourceURL.deletingPathExtension().lastPathComponent
+        let baseName = firstPart.deletingPathExtension().lastPathComponent
         let meetingFolder = uniqueFolderURL(under: outputRoot, baseName: baseName)
 
         // 3. Create the meeting folder.
@@ -96,8 +130,6 @@ struct FileOrganizer: Sendable {
         do {
             try transcript.write(to: transcriptURL, atomically: true, encoding: .utf8)
         } catch {
-            // Roll back the empty folder we just created — nothing else to
-            // clean up since the audio is still in the Watch Folder.
             try? fileManager.removeItem(at: meetingFolder)
             throw FileOrganizerError.writeTranscriptFailed(error.localizedDescription)
         }
@@ -119,22 +151,34 @@ struct FileOrganizer: Sendable {
             }
         }
 
-        // 5. Move the audio into the meeting folder.
-        let destinationAudioURL = meetingFolder.appendingPathComponent(sourceURL.lastPathComponent)
-        do {
-            try fileManager.moveItem(at: sourceURL, to: destinationAudioURL)
-        } catch {
-            // Roll back the transcript, context.md (if any), and the folder.
-            // The audio stays wherever it was so a retry can pick it up.
-            try? fileManager.removeItem(at: transcriptURL)
-            if contextWritten {
-                try? fileManager.removeItem(at: contextURL)
+        // 5. Move each audio part into the meeting folder. On failure of
+        // any move, roll back the already-moved parts so the user's Watch
+        // Folder ends in the state it started in.
+        var movedPairs: [(original: URL, destination: URL)] = []
+        for part in audioParts {
+            let destination = meetingFolder.appendingPathComponent(part.lastPathComponent)
+            do {
+                try fileManager.moveItem(at: part, to: destination)
+                movedPairs.append((original: part, destination: destination))
+            } catch {
+                // Roll back: move every already-moved part back to its
+                // original Watch Folder location.
+                for pair in movedPairs {
+                    try? fileManager.moveItem(at: pair.destination, to: pair.original)
+                }
+                try? fileManager.removeItem(at: transcriptURL)
+                if contextWritten {
+                    try? fileManager.removeItem(at: contextURL)
+                }
+                try? fileManager.removeItem(at: meetingFolder)
+                throw FileOrganizerError.moveAudioFailed(error.localizedDescription)
             }
-            try? fileManager.removeItem(at: meetingFolder)
-            throw FileOrganizerError.moveAudioFailed(error.localizedDescription)
         }
 
-        Log.pipeline.info("Organized \(sourceURL.lastPathComponent, privacy: .public) → \(meetingFolder.lastPathComponent, privacy: .public)")
+        let partsLabel = audioParts.count == 1
+            ? firstPart.lastPathComponent
+            : "\(audioParts.count) parts (\(firstPart.lastPathComponent), …)"
+        Log.pipeline.info("Organized \(partsLabel, privacy: .public) → \(meetingFolder.lastPathComponent, privacy: .public)")
         return meetingFolder
     }
 

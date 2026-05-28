@@ -70,7 +70,8 @@ struct PipelineIntegrationTests {
     private static func makePipeline(
         watch: URL, output: URL, ledger: ProcessedFilesLedger,
         session: URLSession,
-        capture: Capture
+        capture: Capture,
+        meetingNameStore: MeetingNameStore? = nil
     ) async throws -> ProcessingPipeline {
         let watcher = try await FolderWatcher(
             folderURL: watch,
@@ -85,6 +86,14 @@ struct PipelineIntegrationTests {
             model: "whisper-test",
             apiKey: "sk-test"
         )
+        let consume: (@Sendable (Date) async -> String?)?
+        if let store = meetingNameStore {
+            consume = { creationDate in
+                await MainActor.run { store.consume(forFileCreatedAt: creationDate) }
+            }
+        } else {
+            consume = nil
+        }
         return ProcessingPipeline(
             config: config,
             watcher: watcher,
@@ -95,7 +104,8 @@ struct PipelineIntegrationTests {
             },
             onAuditEntry: { entry in
                 Task { @MainActor in capture.entries.append(entry) }
-            }
+            },
+            consumeMeetingName: consume
         )
     }
 
@@ -306,5 +316,234 @@ struct PipelineIntegrationTests {
             encoding: .utf8
         )
         #expect(transcript == "second attempt worked")
+    }
+
+    // MARK: - Meeting-name rename
+
+    /// File creation date is inside Jot's recording window → file gets
+    /// renamed to the meeting name before transcription, and the meeting
+    /// folder + transcript inherit that name.
+    @Test
+    @MainActor
+    func droppedFile_inRecordingWindow_isRenamedToMeetingName() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        MockURLProtocol.responder = { _ in Self.okResponse(body: "the standup notes") }
+
+        let (watch, output, ledger) = try Self.makeFolders()
+        defer {
+            try? FileManager.default.removeItem(at: watch)
+            try? FileManager.default.removeItem(at: output)
+        }
+        let capture = Capture()
+        let store = MeetingNameStore()
+        // Open an active recording window centered on "now" — the file we'll
+        // drop has a fresh creation date, so it must land inside the window.
+        store.recordStarted(name: "Standup", at: Date().addingTimeInterval(-1))
+        let pipeline = try await Self.makePipeline(
+            watch: watch, output: output, ledger: ledger,
+            session: MockURLSession.make(),
+            capture: capture,
+            meetingNameStore: store
+        )
+        try await pipeline.start()
+        defer { Task { await pipeline.stop() } }
+
+        _ = try Self.writeAudio("2026-05-28_14-24-00.mp3", to: watch)
+
+        let got = await Self.waitForCondition {
+            capture.entries.contains { $0.kind == .success }
+        }
+        #expect(got, "Expected a success audit entry. Entries: \(capture.entries.map(\.message))")
+
+        // Meeting folder + transcript named after the meeting, not the AH
+        // timestamp.
+        let meeting = output.appendingPathComponent("Standup", isDirectory: true)
+        #expect(FileManager.default.fileExists(atPath: meeting.path(percentEncoded: false)))
+        #expect(FileManager.default.fileExists(
+            atPath: meeting.appendingPathComponent("Standup.mp3").path(percentEncoded: false)
+        ))
+        let transcript = try String(
+            contentsOf: meeting.appendingPathComponent("Standup.txt"),
+            encoding: .utf8
+        )
+        #expect(transcript == "the standup notes")
+
+        // The pending entry was consumed.
+        #expect(store.pending == nil)
+
+        // An audit "Renamed …" info row was emitted.
+        #expect(capture.entries.contains { $0.kind == .info && $0.message.contains("Renamed") && $0.message.contains("meeting name") })
+    }
+
+    /// File creation date is BEFORE the recording window → no rename. The
+    /// file flows through with its AH-stamped name. This is the protection
+    /// against renaming files the user produced through AH directly.
+    @Test
+    @MainActor
+    func droppedFile_beforeRecordingWindow_keepsOriginalName() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        MockURLProtocol.responder = { _ in Self.okResponse(body: "manual ah recording") }
+
+        let (watch, output, ledger) = try Self.makeFolders()
+        defer {
+            try? FileManager.default.removeItem(at: watch)
+            try? FileManager.default.removeItem(at: output)
+        }
+        let capture = Capture()
+        let store = MeetingNameStore()
+        // Start a recording window in the FUTURE so the file we're about to
+        // drop (created ~now) is definitively before the window.
+        store.recordStarted(name: "Standup", at: Date().addingTimeInterval(3600))
+        let pipeline = try await Self.makePipeline(
+            watch: watch, output: output, ledger: ledger,
+            session: MockURLSession.make(),
+            capture: capture,
+            meetingNameStore: store
+        )
+        try await pipeline.start()
+        defer { Task { await pipeline.stop() } }
+
+        _ = try Self.writeAudio("2026-05-28_10-00-00.mp3", to: watch)
+
+        let got = await Self.waitForCondition {
+            capture.entries.contains { $0.kind == .success }
+        }
+        #expect(got)
+
+        // Original AH-style name preserved.
+        let meeting = output.appendingPathComponent("2026-05-28_10-00-00", isDirectory: true)
+        #expect(FileManager.default.fileExists(atPath: meeting.path(percentEncoded: false)))
+        #expect(FileManager.default.fileExists(
+            atPath: meeting.appendingPathComponent("2026-05-28_10-00-00.mp3").path(percentEncoded: false)
+        ))
+
+        // The future-dated pending was NOT consumed — it's preserved for
+        // when the actual file from that session arrives later.
+        #expect(store.pending != nil)
+
+        // No rename audit row emitted.
+        #expect(!capture.entries.contains { $0.message.contains("Renamed") })
+    }
+
+    /// File creation date is AFTER the recorded stop time by more than the
+    /// slop → no rename. Covers the "user used AH manually after a Jot
+    /// session ended" scenario.
+    @Test
+    @MainActor
+    func droppedFile_afterRecordingStopped_keepsOriginalName() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        MockURLProtocol.responder = { _ in Self.okResponse(body: "later manual recording") }
+
+        let (watch, output, ledger) = try Self.makeFolders()
+        defer {
+            try? FileManager.default.removeItem(at: watch)
+            try? FileManager.default.removeItem(at: output)
+        }
+        let capture = Capture()
+        let store = MeetingNameStore()
+        // Recording that ran 10s in the past, lasted 1s — file dropped now
+        // is well after the stop+slop boundary.
+        let pastStart = Date().addingTimeInterval(-10)
+        store.recordStarted(name: "EarlierMeeting", at: pastStart)
+        store.recordStopped(at: pastStart.addingTimeInterval(1))
+        let pipeline = try await Self.makePipeline(
+            watch: watch, output: output, ledger: ledger,
+            session: MockURLSession.make(),
+            capture: capture,
+            meetingNameStore: store
+        )
+        try await pipeline.start()
+        defer { Task { await pipeline.stop() } }
+
+        _ = try Self.writeAudio("2026-05-28_14-30-00.mp3", to: watch)
+
+        let got = await Self.waitForCondition {
+            capture.entries.contains { $0.kind == .success }
+        }
+        #expect(got)
+
+        let meeting = output.appendingPathComponent("2026-05-28_14-30-00", isDirectory: true)
+        #expect(FileManager.default.fileExists(atPath: meeting.path(percentEncoded: false)))
+        #expect(!capture.entries.contains { $0.message.contains("Renamed") })
+    }
+
+    /// Meeting name contains forbidden characters → sanitization kicks in,
+    /// rename succeeds with a cleaned-up name.
+    @Test
+    @MainActor
+    func meetingName_withForbiddenChars_isSanitizedBeforeRename() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        MockURLProtocol.responder = { _ in Self.okResponse(body: "client call notes") }
+
+        let (watch, output, ledger) = try Self.makeFolders()
+        defer {
+            try? FileManager.default.removeItem(at: watch)
+            try? FileManager.default.removeItem(at: output)
+        }
+        let capture = Capture()
+        let store = MeetingNameStore()
+        store.recordStarted(name: "Client/Project:Q3", at: Date().addingTimeInterval(-1))
+        let pipeline = try await Self.makePipeline(
+            watch: watch, output: output, ledger: ledger,
+            session: MockURLSession.make(),
+            capture: capture,
+            meetingNameStore: store
+        )
+        try await pipeline.start()
+        defer { Task { await pipeline.stop() } }
+
+        _ = try Self.writeAudio("2026-05-28_15-00-00.mp3", to: watch)
+
+        let got = await Self.waitForCondition {
+            capture.entries.contains { $0.kind == .success }
+        }
+        #expect(got)
+
+        // Both `/` and `:` became `-`, then the consecutive hyphens collapsed.
+        let meeting = output.appendingPathComponent("Client-Project-Q3", isDirectory: true)
+        #expect(FileManager.default.fileExists(atPath: meeting.path(percentEncoded: false)))
+        #expect(FileManager.default.fileExists(
+            atPath: meeting.appendingPathComponent("Client-Project-Q3.mp3").path(percentEncoded: false)
+        ))
+    }
+
+    /// No `MeetingNameStore` injected → the pipeline behaves exactly as it
+    /// did before this feature. (Belt-and-braces — confirms the rename path
+    /// is gated entirely on the consume closure being present.)
+    @Test
+    @MainActor
+    func noMeetingNameStore_pipelineKeepsOriginalName() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        MockURLProtocol.responder = { _ in Self.okResponse(body: "no store wired") }
+
+        let (watch, output, ledger) = try Self.makeFolders()
+        defer {
+            try? FileManager.default.removeItem(at: watch)
+            try? FileManager.default.removeItem(at: output)
+        }
+        let capture = Capture()
+        let pipeline = try await Self.makePipeline(
+            watch: watch, output: output, ledger: ledger,
+            session: MockURLSession.make(),
+            capture: capture,
+            meetingNameStore: nil
+        )
+        try await pipeline.start()
+        defer { Task { await pipeline.stop() } }
+
+        _ = try Self.writeAudio("untouched.mp3", to: watch)
+
+        let got = await Self.waitForCondition {
+            capture.entries.contains { $0.kind == .success }
+        }
+        #expect(got)
+
+        let meeting = output.appendingPathComponent("untouched", isDirectory: true)
+        #expect(FileManager.default.fileExists(atPath: meeting.path(percentEncoded: false)))
     }
 }

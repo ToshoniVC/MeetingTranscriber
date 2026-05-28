@@ -24,6 +24,7 @@ final class HotkeyCoordinator {
     private let audioHijack: AudioHijackController
     private let menuBar: MenuBarController
     private let auditLog: AuditLogStore
+    private let meetingNameStore: MeetingNameStore?
 
     /// One-line user-facing error if the most recent registration attempt
     /// failed (`HotkeyError.registrationFailed`). `nil` on success.
@@ -48,7 +49,8 @@ final class HotkeyCoordinator {
         invoker: ShortcutInvoker,
         audioHijack: AudioHijackController,
         menuBar: MenuBarController,
-        auditLog: AuditLogStore
+        auditLog: AuditLogStore,
+        meetingNameStore: MeetingNameStore? = nil
     ) {
         self.settings = settings
         self.registrar = registrar
@@ -56,6 +58,7 @@ final class HotkeyCoordinator {
         self.audioHijack = audioHijack
         self.menuBar = menuBar
         self.auditLog = auditLog
+        self.meetingNameStore = meetingNameStore
     }
 
     /// Force-stop the active recording (the "Stop recording" menu-bar
@@ -66,6 +69,7 @@ final class HotkeyCoordinator {
                 stopShortcutName: settings.stopShortcutName
             )
             menuBar.setRecording(false)
+            meetingNameStore?.recordStopped()
             auditLog.append(.init(
                 kind: .info,
                 sourcePath: "AudioHijack",
@@ -266,6 +270,7 @@ final class HotkeyCoordinator {
         switch action {
         case .started(let name):
             menuBar.setRecording(true, meetingName: name)
+            meetingNameStore?.recordStarted(name: name)
             auditLog.append(.init(
                 kind: .info,
                 sourcePath: "AudioHijack",
@@ -275,6 +280,7 @@ final class HotkeyCoordinator {
             ))
         case .stopped:
             menuBar.setRecording(false)
+            meetingNameStore?.recordStopped()
             auditLog.append(.init(
                 kind: .info,
                 sourcePath: "AudioHijack",

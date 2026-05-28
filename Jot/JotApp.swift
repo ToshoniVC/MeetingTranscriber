@@ -25,10 +25,15 @@ struct JotApp: App {
         let menuBar = MenuBarController()
         let settings = AppSettings()
         let auditLog = AuditLogStore()
+        // Shared between HotkeyCoordinator (stamps started/stopped events)
+        // and PipelineCoordinator (queries it when a new file lands to
+        // decide whether to rename to the user-typed meeting name).
+        let meetingNameStore = MeetingNameStore()
         let pipeline = PipelineCoordinator(
             settings: settings,
             auditLog: auditLog,
-            menuBar: menuBar
+            menuBar: menuBar,
+            meetingNameStore: meetingNameStore
         )
         let audioHijack = AudioHijackPresence()
         let invoker = ShortcutInvoker()
@@ -43,7 +48,8 @@ struct JotApp: App {
             invoker: invoker,
             audioHijack: ahController,
             menuBar: menuBar,
-            auditLog: auditLog
+            auditLog: auditLog,
+            meetingNameStore: meetingNameStore
         )
         let loginItem = LoginItemController(manager: LoginItemManager())
         let errorInspector = ErrorInspector()

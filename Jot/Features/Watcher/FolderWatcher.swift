@@ -123,6 +123,15 @@ actor FolderWatcher {
         try? await ledger.forget(url)
     }
 
+    /// Pre-register a URL in the ledger so the watcher won't emit it once
+    /// it actually appears on disk. Used by `ProcessingPipeline` immediately
+    /// before renaming a freshly-detected file to the user's meeting name —
+    /// without this, the rename's FS event would re-enter the file through
+    /// the watcher and cause double-processing.
+    func preRecord(_ url: URL) async {
+        try? await ledger.record(url)
+    }
+
     /// Tear down monitoring. The `AsyncStream` returned by `start()` will end.
     func stop() {
         recheckTask?.cancel()

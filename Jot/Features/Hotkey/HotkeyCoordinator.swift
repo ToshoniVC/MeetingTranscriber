@@ -24,7 +24,8 @@ final class HotkeyCoordinator {
     private let audioHijack: AudioHijackController
     private let menuBar: MenuBarController
     private let auditLog: AuditLogStore
-    private let meetingNameStore: MeetingNameStore?
+    private let organizations: OrganizationStore
+    private let meetingContextStore: MeetingContextStore
 
     /// One-line user-facing error if the most recent registration attempt
     /// failed (`HotkeyError.registrationFailed`). `nil` on success.
@@ -50,7 +51,8 @@ final class HotkeyCoordinator {
         audioHijack: AudioHijackController,
         menuBar: MenuBarController,
         auditLog: AuditLogStore,
-        meetingNameStore: MeetingNameStore? = nil
+        organizations: OrganizationStore,
+        meetingContextStore: MeetingContextStore
     ) {
         self.settings = settings
         self.registrar = registrar
@@ -58,7 +60,8 @@ final class HotkeyCoordinator {
         self.audioHijack = audioHijack
         self.menuBar = menuBar
         self.auditLog = auditLog
-        self.meetingNameStore = meetingNameStore
+        self.organizations = organizations
+        self.meetingContextStore = meetingContextStore
     }
 
     /// Force-stop the active recording (the "Stop recording" menu-bar
@@ -69,7 +72,7 @@ final class HotkeyCoordinator {
                 stopShortcutName: settings.stopShortcutName
             )
             menuBar.setRecording(false)
-            meetingNameStore?.recordStopped()
+            meetingContextStore.recordStopped()
             auditLog.append(.init(
                 kind: .info,
                 sourcePath: "AudioHijack",
@@ -111,7 +114,9 @@ final class HotkeyCoordinator {
                 let action = try await audioHijack.toggleRecording(
                     isCurrentlyRecording: menuBar.isRecording,
                     startShortcutName: settings.startShortcutName,
-                    stopShortcutName: settings.stopShortcutName
+                    stopShortcutName: settings.stopShortcutName,
+                    organizations: organizations.organizations,
+                    defaultOrgId: organizations.defaultOrg()?.id
                 )
                 applyAudioHijackAction(action, source: "Manual")
                 return nil
@@ -241,7 +246,9 @@ final class HotkeyCoordinator {
             let action = try await audioHijack.toggleRecording(
                 isCurrentlyRecording: menuBar.isRecording,
                 startShortcutName: settings.startShortcutName,
-                stopShortcutName: settings.stopShortcutName
+                stopShortcutName: settings.stopShortcutName,
+                organizations: organizations.organizations,
+                defaultOrgId: organizations.defaultOrg()?.id
             )
             applyAudioHijackAction(action, source: "Hotkey")
             lastTriggerError = nil
@@ -268,19 +275,31 @@ final class HotkeyCoordinator {
     /// and the Test recording button.
     private func applyAudioHijackAction(_ action: RecordingAction, source: String) {
         switch action {
-        case .started(let name):
-            menuBar.setRecording(true, meetingName: name)
-            meetingNameStore?.recordStarted(name: name)
+        case .started(let inputs):
+            menuBar.setRecording(true, meetingName: inputs.meetingName)
+            let org = inputs.organizationId.flatMap { organizations.organization(id: $0) }
+            let compiled = ContextCompiler.compile(
+                meetingName: inputs.meetingName,
+                meetingSpecificContext: inputs.meetingSpecificContext,
+                organization: org
+            )
+            meetingContextStore.recordStarted(
+                meetingName: inputs.meetingName,
+                organizationId: inputs.organizationId,
+                meetingSpecificContext: inputs.meetingSpecificContext,
+                resolvedCompiledContext: compiled
+            )
+            let orgSuffix = org.map { " · \($0.name)" } ?? " · No Organization"
             auditLog.append(.init(
                 kind: .info,
                 sourcePath: "AudioHijack",
-                message: name.isEmpty
+                message: inputs.meetingName.isEmpty
                     ? "\(source): started recording"
-                    : "\(source): started recording '\(name)'"
+                    : "\(source): started recording '\(inputs.meetingName)'\(orgSuffix)"
             ))
         case .stopped:
             menuBar.setRecording(false)
-            meetingNameStore?.recordStopped()
+            meetingContextStore.recordStopped()
             auditLog.append(.init(
                 kind: .info,
                 sourcePath: "AudioHijack",

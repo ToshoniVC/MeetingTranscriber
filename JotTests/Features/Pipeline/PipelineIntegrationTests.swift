@@ -71,7 +71,7 @@ struct PipelineIntegrationTests {
         watch: URL, output: URL, ledger: ProcessedFilesLedger,
         session: URLSession,
         capture: Capture,
-        meetingNameStore: MeetingNameStore? = nil
+        meetingContextStore: MeetingContextStore? = nil
     ) async throws -> ProcessingPipeline {
         let watcher = try await FolderWatcher(
             folderURL: watch,
@@ -86,8 +86,8 @@ struct PipelineIntegrationTests {
             model: "whisper-test",
             apiKey: "sk-test"
         )
-        let consume: (@Sendable (Date) async -> String?)?
-        if let store = meetingNameStore {
+        let consume: (@Sendable (Date) async -> MeetingContextSnapshot?)?
+        if let store = meetingContextStore {
             consume = { creationDate in
                 await MainActor.run { store.consume(forFileCreatedAt: creationDate) }
             }
@@ -105,7 +105,7 @@ struct PipelineIntegrationTests {
             onAuditEntry: { entry in
                 Task { @MainActor in capture.entries.append(entry) }
             },
-            consumeMeetingName: consume
+            consumeMeetingContext: consume
         )
     }
 
@@ -336,15 +336,15 @@ struct PipelineIntegrationTests {
             try? FileManager.default.removeItem(at: output)
         }
         let capture = Capture()
-        let store = MeetingNameStore()
+        let store = MeetingContextStore()
         // Open an active recording window centered on "now" — the file we'll
         // drop has a fresh creation date, so it must land inside the window.
-        store.recordStarted(name: "Standup", at: Date().addingTimeInterval(-1))
+        store.recordStarted(meetingName: "Standup", at: Date().addingTimeInterval(-1))
         let pipeline = try await Self.makePipeline(
             watch: watch, output: output, ledger: ledger,
             session: MockURLSession.make(),
             capture: capture,
-            meetingNameStore: store
+            meetingContextStore: store
         )
         try await pipeline.start()
         defer { Task { await pipeline.stop() } }
@@ -392,15 +392,15 @@ struct PipelineIntegrationTests {
             try? FileManager.default.removeItem(at: output)
         }
         let capture = Capture()
-        let store = MeetingNameStore()
+        let store = MeetingContextStore()
         // Start a recording window in the FUTURE so the file we're about to
         // drop (created ~now) is definitively before the window.
-        store.recordStarted(name: "Standup", at: Date().addingTimeInterval(3600))
+        store.recordStarted(meetingName: "Standup", at: Date().addingTimeInterval(3600))
         let pipeline = try await Self.makePipeline(
             watch: watch, output: output, ledger: ledger,
             session: MockURLSession.make(),
             capture: capture,
-            meetingNameStore: store
+            meetingContextStore: store
         )
         try await pipeline.start()
         defer { Task { await pipeline.stop() } }
@@ -443,17 +443,17 @@ struct PipelineIntegrationTests {
             try? FileManager.default.removeItem(at: output)
         }
         let capture = Capture()
-        let store = MeetingNameStore()
+        let store = MeetingContextStore()
         // Recording that ran 10s in the past, lasted 1s — file dropped now
         // is well after the stop+slop boundary.
         let pastStart = Date().addingTimeInterval(-10)
-        store.recordStarted(name: "EarlierMeeting", at: pastStart)
+        store.recordStarted(meetingName: "EarlierMeeting", at: pastStart)
         store.recordStopped(at: pastStart.addingTimeInterval(1))
         let pipeline = try await Self.makePipeline(
             watch: watch, output: output, ledger: ledger,
             session: MockURLSession.make(),
             capture: capture,
-            meetingNameStore: store
+            meetingContextStore: store
         )
         try await pipeline.start()
         defer { Task { await pipeline.stop() } }
@@ -485,13 +485,13 @@ struct PipelineIntegrationTests {
             try? FileManager.default.removeItem(at: output)
         }
         let capture = Capture()
-        let store = MeetingNameStore()
-        store.recordStarted(name: "Client/Project:Q3", at: Date().addingTimeInterval(-1))
+        let store = MeetingContextStore()
+        store.recordStarted(meetingName: "Client/Project:Q3", at: Date().addingTimeInterval(-1))
         let pipeline = try await Self.makePipeline(
             watch: watch, output: output, ledger: ledger,
             session: MockURLSession.make(),
             capture: capture,
-            meetingNameStore: store
+            meetingContextStore: store
         )
         try await pipeline.start()
         defer { Task { await pipeline.stop() } }
@@ -511,12 +511,12 @@ struct PipelineIntegrationTests {
         ))
     }
 
-    /// No `MeetingNameStore` injected → the pipeline behaves exactly as it
-    /// did before this feature. (Belt-and-braces — confirms the rename path
-    /// is gated entirely on the consume closure being present.)
+    /// No `MeetingContextStore` injected → the pipeline behaves exactly as
+    /// it did before this feature. (Belt-and-braces — confirms the rename
+    /// path is gated entirely on the consume closure being present.)
     @Test
     @MainActor
-    func noMeetingNameStore_pipelineKeepsOriginalName() async throws {
+    func noMeetingContextStore_pipelineKeepsOriginalName() async throws {
         MockURLProtocol.reset()
         defer { MockURLProtocol.reset() }
         MockURLProtocol.responder = { _ in Self.okResponse(body: "no store wired") }
@@ -531,7 +531,7 @@ struct PipelineIntegrationTests {
             watch: watch, output: output, ledger: ledger,
             session: MockURLSession.make(),
             capture: capture,
-            meetingNameStore: nil
+            meetingContextStore: nil
         )
         try await pipeline.start()
         defer { Task { await pipeline.stop() } }

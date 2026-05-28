@@ -13,6 +13,7 @@ struct JotApp: App {
     @State private var settings: AppSettings
     @State private var auditLog: AuditLogStore
     @State private var organizations: OrganizationStore
+    @State private var meetingContextStore: MeetingContextStore
     @State private var pipeline: PipelineCoordinator
     @State private var hotkey: HotkeyCoordinator
     @State private var loginItem: LoginItemController
@@ -27,20 +28,20 @@ struct JotApp: App {
         let settings = AppSettings()
         let auditLog = AuditLogStore()
         let organizations = OrganizationStore()
-        // Shared between HotkeyCoordinator (stamps started/stopped events)
+        // Shared between HotkeyCoordinator (stamps started/stopped/edits)
         // and PipelineCoordinator (queries it when a new file lands to
-        // decide whether to rename to the user-typed meeting name).
-        let meetingNameStore = MeetingNameStore()
+        // pull the meeting name + compiled context).
+        let meetingContextStore = MeetingContextStore()
         let pipeline = PipelineCoordinator(
             settings: settings,
             auditLog: auditLog,
             menuBar: menuBar,
-            meetingNameStore: meetingNameStore
+            meetingContextStore: meetingContextStore
         )
         let audioHijack = AudioHijackPresence()
         let invoker = ShortcutInvoker()
         let ahController = AudioHijackController(
-            prompter: SystemMeetingNamePrompter(),
+            prompter: SystemMeetingStartPrompter(),
             invoker: invoker,
             presence: audioHijack
         )
@@ -51,7 +52,8 @@ struct JotApp: App {
             audioHijack: ahController,
             menuBar: menuBar,
             auditLog: auditLog,
-            meetingNameStore: meetingNameStore
+            organizations: organizations,
+            meetingContextStore: meetingContextStore
         )
         let loginItem = LoginItemController(manager: LoginItemManager())
         let errorInspector = ErrorInspector()
@@ -61,6 +63,7 @@ struct JotApp: App {
         self._settings = State(initialValue: settings)
         self._auditLog = State(initialValue: auditLog)
         self._organizations = State(initialValue: organizations)
+        self._meetingContextStore = State(initialValue: meetingContextStore)
         self._pipeline = State(initialValue: pipeline)
         self._hotkey = State(initialValue: hotkey)
         self._loginItem = State(initialValue: loginItem)
@@ -93,6 +96,8 @@ struct JotApp: App {
                 errorInspector: errorInspector,
                 debugMode: debugMode
             )
+            .environment(meetingContextStore)
+            .environment(organizations)
         } label: {
             MenuBarIconLabel(
                 isRecording: menuBar.isRecording,
@@ -107,6 +112,7 @@ struct JotApp: App {
                 .environment(settings)
                 .environment(auditLog)
                 .environment(organizations)
+                .environment(meetingContextStore)
                 .environment(pipeline)
                 .environment(hotkey)
                 .environment(loginItem)
@@ -118,6 +124,17 @@ struct JotApp: App {
                 .frame(minWidth: 760, minHeight: 480)
         }
         .windowResizability(.contentMinSize)
+
+        // Phase E: floating editor for the currently-recording meeting's
+        // metadata. Opened from the menu-bar dropdown via openWindow(id:).
+        // Auto-closes when the recording ends (pending becomes nil) —
+        // handled inside `CurrentMeetingEditorView`.
+        Window("Current meeting", id: "current-meeting-editor") {
+            CurrentMeetingEditorView()
+                .environment(meetingContextStore)
+                .environment(organizations)
+        }
+        .windowResizability(.contentSize)
     }
 
     /// Resolves the user-visible app name from the bundle so the Window
@@ -195,9 +212,13 @@ private struct MenuBarDropdown: View {
 
         Divider()
 
-        // "Stop recording" only shown while AH is recording — gives the user
-        // a click-to-stop path that doesn't require the hotkey.
+        // "Stop recording" + "Edit current meeting…" only shown while AH is
+        // recording — both require an active session to be useful.
         if menuBar.isRecording {
+            Button("Edit current meeting…") {
+                openWindow(id: "current-meeting-editor")
+                NSApp.activate(ignoringOtherApps: true)
+            }
             Button("Stop recording") {
                 Task { await hotkey.stopRecordingNow() }
             }

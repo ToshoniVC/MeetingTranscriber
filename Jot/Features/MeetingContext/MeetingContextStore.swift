@@ -124,4 +124,43 @@ final class MeetingContextStore {
     func reset() {
         pending = nil
     }
+
+    /// Sanitize a user-typed meeting name into a filename component.
+    /// Removes characters the filesystem can't represent (`/`, `\0`) plus
+    /// a few (`:`, control chars) the Finder can't display sensibly, trims
+    /// dots and whitespace, and caps the length. Returns nil if nothing
+    /// usable remains.
+    ///
+    /// `nonisolated` so the pipeline actor can call it without a hop —
+    /// pure function over the input, no shared state. Inherited from the
+    /// now-removed `MeetingNameStore`.
+    nonisolated static func sanitizedFilenameComponent(_ raw: String) -> String? {
+        // Replace forbidden chars with a hyphen. `/` and `\0` are the only
+        // ones POSIX strictly forbids; `:` is forbidden by HFS+ legacy paths
+        // and shows up as `/` in the Finder. The rest are characters that
+        // look fine in a UI but break shell tooling or look odd in a file
+        // browser.
+        var cleaned = ""
+        cleaned.reserveCapacity(raw.count)
+        for scalar in raw.unicodeScalars {
+            if scalar.value < 0x20 || scalar.value == 0x7F {
+                cleaned.append("-")
+            } else if scalar == "/" || scalar == ":" || scalar == "\\" {
+                cleaned.append("-")
+            } else {
+                cleaned.append(Character(scalar))
+            }
+        }
+        while cleaned.contains("--") {
+            cleaned = cleaned.replacingOccurrences(of: "--", with: "-")
+        }
+        let trimmed = cleaned.trimmingCharacters(
+            in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "."))
+        )
+        guard !trimmed.isEmpty else { return nil }
+        if trimmed.count > 200 {
+            return String(trimmed.prefix(200))
+        }
+        return trimmed
+    }
 }

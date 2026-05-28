@@ -48,12 +48,15 @@ actor ProcessingPipeline {
     private let onStateChange: @Sendable (PipelineState) -> Void
     private let onAuditEntry: @Sendable (AuditLogEntry) -> Void
 
-    /// Optional bridge to `MeetingNameStore`. Given a file's creation date,
-    /// returns the meeting name the user typed when this recording started
-    /// — but only if that creation date is plausibly inside Jot's recording
-    /// window (see `MeetingNameStore` for the time-window check). Nil for
-    /// tests / harnesses that don't care about renaming.
-    private let consumeMeetingName: (@Sendable (Date) async -> String?)?
+    /// Optional bridge to `MeetingContextStore`. Given a file's creation
+    /// date, returns the full snapshot for the recording Jot kicked off —
+    /// but only if that creation date is plausibly inside Jot's recording
+    /// window (see `MeetingContextStore` for the time-window check). Nil
+    /// for tests / harnesses that don't care about renaming or context.
+    ///
+    /// Phase D uses only `snapshot.meetingName` (for rename); Phase F adds
+    /// the prompt-compile + send step using the same snapshot.
+    private let consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)?
 
     private var running = false
     private var consumerTask: Task<Void, Never>?
@@ -65,7 +68,7 @@ actor ProcessingPipeline {
         fileOrganizer: FileOrganizer = FileOrganizer(),
         onStateChange: @escaping @Sendable (PipelineState) -> Void,
         onAuditEntry: @escaping @Sendable (AuditLogEntry) -> Void,
-        consumeMeetingName: (@Sendable (Date) async -> String?)? = nil
+        consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)? = nil
     ) {
         self.config = config
         self.watcher = watcher
@@ -73,7 +76,7 @@ actor ProcessingPipeline {
         self.fileOrganizer = fileOrganizer
         self.onStateChange = onStateChange
         self.onAuditEntry = onAuditEntry
-        self.consumeMeetingName = consumeMeetingName
+        self.consumeMeetingContext = consumeMeetingContext
     }
 
     // MARK: - Lifecycle
@@ -187,10 +190,10 @@ actor ProcessingPipeline {
     /// empty, or the actual `moveItem` failed). Never throws — rename is
     /// strictly best-effort and must not block transcription.
     private func renameIfMeetingNamePending(_ url: URL) async -> URL? {
-        guard let consume = consumeMeetingName else { return nil }
+        guard let consume = consumeMeetingContext else { return nil }
         guard let creationDate = fileCreationDate(of: url) else { return nil }
-        guard let rawName = await consume(creationDate) else { return nil }
-        guard let safeName = MeetingNameStore.sanitizedFilenameComponent(rawName) else { return nil }
+        guard let snapshot = await consume(creationDate) else { return nil }
+        guard let safeName = MeetingContextStore.sanitizedFilenameComponent(snapshot.meetingName) else { return nil }
 
         let parent = url.deletingLastPathComponent()
         let ext = url.pathExtension
@@ -226,7 +229,7 @@ actor ProcessingPipeline {
 
     /// Inode creation timestamp via `URLResourceValues`. Approximates when
     /// Audio Hijack opened the file for writing — i.e., when recording
-    /// began — which is exactly what `MeetingNameStore` wants to compare
+    /// began — which is exactly what `MeetingContextStore` wants to compare
     /// against its `startedAt`.
     private func fileCreationDate(of url: URL) -> Date? {
         let values = try? url.resourceValues(forKeys: [.creationDateKey])

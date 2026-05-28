@@ -14,20 +14,22 @@ struct HotkeyCoordinatorTests {
     private func makeFixture(
         registrar: FakeHotkeyRegistrar? = nil,
         opener: RecordingURLOpener? = nil,
-        prompter: StubMeetingNamePrompter? = nil,
+        prompter: StubMeetingStartPrompter? = nil,
         audioHijackInstalled: Bool = true
     ) -> (
         coordinator: HotkeyCoordinator,
         settings: AppSettings,
         registrar: FakeHotkeyRegistrar,
         opener: RecordingURLOpener,
-        prompter: StubMeetingNamePrompter,
+        prompter: StubMeetingStartPrompter,
         menuBar: MenuBarController,
-        auditLog: AuditLogStore
+        auditLog: AuditLogStore,
+        organizations: OrganizationStore,
+        meetingContextStore: MeetingContextStore
     ) {
         let registrar = registrar ?? FakeHotkeyRegistrar()
         let opener = opener ?? RecordingURLOpener()
-        let prompter = prompter ?? StubMeetingNamePrompter()
+        let prompter = prompter ?? StubMeetingStartPrompter()
         let defaults = EphemeralUserDefaults.make()
         let keychain = InMemoryKeychain()
         let settings = AppSettings(defaults: defaults, keychain: keychain)
@@ -35,6 +37,11 @@ struct HotkeyCoordinatorTests {
             fileURL: FileManager.default.temporaryDirectory
                 .appendingPathComponent("jot-hotkey-coord-\(UUID().uuidString).json")
         )
+        let organizations = OrganizationStore(
+            fileURL: FileManager.default.temporaryDirectory
+                .appendingPathComponent("jot-hotkey-orgs-\(UUID().uuidString).json")
+        )
+        let meetingContextStore = MeetingContextStore()
         let presence = AudioHijackPresence(
             bundleIDLookup: { _ in
                 audioHijackInstalled ? URL(fileURLWithPath: "/Applications/Audio Hijack.app") : nil
@@ -44,9 +51,6 @@ struct HotkeyCoordinatorTests {
                 audioHijackInstalled ? "com.rogueamoeba.audiohijack" : nil
             }
         )
-        // One invoker shared between AudioHijackController and HotkeyCoordinator
-        // — both ask macOS to open `shortcuts://run-shortcut?…` URLs, just with
-        // different names, so the recording opener captures every URL.
         let invoker = ShortcutInvoker(opener: opener)
         let audioHijack = AudioHijackController(
             prompter: prompter,
@@ -60,9 +64,18 @@ struct HotkeyCoordinatorTests {
             invoker: invoker,
             audioHijack: audioHijack,
             menuBar: menuBar,
-            auditLog: auditLog
+            auditLog: auditLog,
+            organizations: organizations,
+            meetingContextStore: meetingContextStore
         )
-        return (coordinator, settings, registrar, opener, prompter, menuBar, auditLog)
+        return (
+            coordinator, settings, registrar, opener, prompter, menuBar,
+            auditLog, organizations, meetingContextStore
+        )
+    }
+
+    private func inputs(_ name: String) -> MeetingStartInputs {
+        MeetingStartInputs(meetingName: name)
     }
 
     // MARK: - Registration
@@ -81,7 +94,6 @@ struct HotkeyCoordinatorTests {
     @Test
     func bootstrap_withoutHotkey_doesNotRegister() async {
         let f = makeFixture()
-        // recordingHotkey defaults to nil
         await f.coordinator.bootstrap()
         #expect(f.registrar.registerCallCount == 0)
         #expect(f.coordinator.activeHotkey == nil)
@@ -96,7 +108,6 @@ struct HotkeyCoordinatorTests {
         await f.coordinator.bootstrap()
         #expect(f.coordinator.registrationError != nil)
         #expect(f.coordinator.activeHotkey == nil)
-        // The "already in use by another app" message is specifically called out.
         #expect(f.coordinator.registrationError?.contains("already in use") == true)
     }
 
@@ -105,14 +116,13 @@ struct HotkeyCoordinatorTests {
     @Test
     func firingHotkey_default_opensStartShortcutURL() async throws {
         let f = makeFixture()
-        f.prompter.nextResponse = "Standup"
+        f.prompter.nextResponse = inputs("Standup")
         f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
         await f.coordinator.bootstrap()
 
         f.registrar.fireTrigger()
         try await Task.sleep(nanoseconds: 100_000_000)
 
-        // Built-in path: prompt + shortcuts://run-shortcut?name=Start&input=…
         #expect(f.prompter.askCount == 1)
         #expect(f.opener.openedURLs.count == 1)
         let url = f.opener.openedURLs[0]
@@ -123,9 +133,55 @@ struct HotkeyCoordinatorTests {
     }
 
     @Test
-    func firingHotkey_builtIn_appendsInfoAuditEntryWithMeetingName() async throws {
+    func firingHotkey_passesOrgsAndDefaultToPrompter() async throws {
         let f = makeFixture()
-        f.prompter.nextResponse = "Demo Meeting"
+        let acme = try f.organizations.upsert(Organization(name: "Acme", isDefault: true))
+        f.prompter.nextResponse = inputs("Sync")
+        f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
+        await f.coordinator.bootstrap()
+
+        f.registrar.fireTrigger()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        #expect(f.prompter.lastOrganizations.map(\.id) == [acme.id])
+        #expect(f.prompter.lastDefaultOrgId == acme.id)
+    }
+
+    @Test
+    func firingHotkey_storesContextSnapshotWithCompiledPrompt() async throws {
+        let f = makeFixture()
+        let acme = try f.organizations.upsert(Organization(
+            name: "Acme",
+            staffNames: ["Alice"]
+        ))
+        f.prompter.nextResponse = MeetingStartInputs(
+            meetingName: "Standup",
+            organizationId: acme.id,
+            meetingSpecificContext: "Quarterly check-in"
+        )
+        f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
+        await f.coordinator.bootstrap()
+
+        f.registrar.fireTrigger()
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        let snapshot = f.meetingContextStore.pending?.snapshot
+        #expect(snapshot?.meetingName == "Standup")
+        #expect(snapshot?.organizationId == acme.id)
+        #expect(snapshot?.meetingSpecificContext == "Quarterly check-in")
+        #expect(snapshot?.resolvedCompiledContext.contains("Organization: Acme") == true)
+        #expect(snapshot?.resolvedCompiledContext.contains("Staff: Alice") == true)
+        #expect(snapshot?.resolvedCompiledContext.contains("Quarterly check-in") == true)
+    }
+
+    @Test
+    func firingHotkey_builtIn_appendsInfoAuditEntryWithMeetingNameAndOrg() async throws {
+        let f = makeFixture()
+        let acme = try f.organizations.upsert(Organization(name: "Acme"))
+        f.prompter.nextResponse = MeetingStartInputs(
+            meetingName: "Demo Meeting",
+            organizationId: acme.id
+        )
         f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
         await f.coordinator.bootstrap()
 
@@ -134,12 +190,13 @@ struct HotkeyCoordinatorTests {
 
         #expect(f.auditLog.entries.first?.kind == .info)
         #expect(f.auditLog.entries.first?.message.contains("Demo Meeting") == true)
+        #expect(f.auditLog.entries.first?.message.contains("Acme") == true)
     }
 
     @Test
     func firingHotkey_builtIn_userCancels_addsNoAuditEntry() async throws {
         let f = makeFixture()
-        f.prompter.nextResponse = nil    // user cancelled the dialog
+        f.prompter.nextResponse = nil
         f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
         await f.coordinator.bootstrap()
 
@@ -152,37 +209,31 @@ struct HotkeyCoordinatorTests {
     @Test
     func firingHotkey_builtIn_whileRecording_stopsAndUpdatesMenuBar() async throws {
         let f = makeFixture()
-        f.prompter.nextResponse = "Standup"
+        f.prompter.nextResponse = inputs("Standup")
         f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
         await f.coordinator.bootstrap()
 
-        // First press: start
         f.registrar.fireTrigger()
         try await Task.sleep(nanoseconds: 100_000_000)
         #expect(f.menuBar.isRecording == true)
         #expect(f.menuBar.recordingMeetingName == "Standup")
 
-        // Second press: should stop (no prompt)
         f.registrar.fireTrigger()
         try await Task.sleep(nanoseconds: 100_000_000)
         #expect(f.menuBar.isRecording == false)
         #expect(f.menuBar.recordingMeetingName == nil)
-        // Prompter was asked only once (for the start, not the stop).
         #expect(f.prompter.askCount == 1)
-        // Two URLs opened: start, then stop.
         #expect(f.opener.openedURLs.count == 2)
         #expect(f.opener.openedURLs[0].queryValue(named: "name") == f.settings.startShortcutName)
         #expect(f.opener.openedURLs[1].queryValue(named: "name") == f.settings.stopShortcutName)
-        // Stop never sends an input.
         #expect(f.opener.openedURLs[1].queryValue(named: "input") == nil)
-        // Final audit entry is the "stopped" info row.
         #expect(f.auditLog.entries.first?.message.contains("stopped") == true)
     }
 
     @Test
     func firingHotkey_builtIn_audioHijackMissing_logsFailure() async throws {
         let f = makeFixture(audioHijackInstalled: false)
-        f.prompter.nextResponse = "X"
+        f.prompter.nextResponse = inputs("X")
         f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
         await f.coordinator.bootstrap()
 
@@ -191,7 +242,6 @@ struct HotkeyCoordinatorTests {
 
         #expect(f.auditLog.entries.first?.kind == .failure)
         #expect(f.auditLog.entries.first?.message.contains("not installed") == true)
-        // Inline display: same message surfaces on `lastTriggerError`.
         #expect(f.coordinator.lastTriggerError?.contains("not installed") == true)
     }
 
@@ -202,7 +252,7 @@ struct HotkeyCoordinatorTests {
             NSLocalizedDescriptionKey: "Shortcuts unavailable"
         ])
         let f = makeFixture(opener: opener)
-        f.prompter.nextResponse = "X"
+        f.prompter.nextResponse = inputs("X")
         f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
         await f.coordinator.bootstrap()
 
@@ -216,18 +266,16 @@ struct HotkeyCoordinatorTests {
 
     @Test
     func firingHotkey_success_clearsLastTriggerError() async throws {
-        // First press fails (no AH) → lastTriggerError populated.
         let f = makeFixture(audioHijackInstalled: false)
-        f.prompter.nextResponse = "X"
+        f.prompter.nextResponse = inputs("X")
         f.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
         await f.coordinator.bootstrap()
         f.registrar.fireTrigger()
         try await Task.sleep(nanoseconds: 100_000_000)
         #expect(f.coordinator.lastTriggerError != nil)
 
-        // Fresh happy fixture: fire and verify lastTriggerError stays nil.
         let g = makeFixture()
-        g.prompter.nextResponse = "Y"
+        g.prompter.nextResponse = inputs("Y")
         g.settings.recordingHotkey = KeyCombo(keyCode: 15, modifierFlags: [.command])
         await g.coordinator.bootstrap()
         g.registrar.fireTrigger()
@@ -250,7 +298,6 @@ struct HotkeyCoordinatorTests {
 
         #expect(f.opener.openedURLs.count == 1)
         #expect(f.opener.openedURLs[0].queryValue(named: "name") == "Custom")
-        // Custom mode never prompts and never sends input.
         #expect(f.prompter.askCount == 0)
         #expect(f.opener.openedURLs[0].queryValue(named: "input") == nil)
     }
@@ -278,10 +325,9 @@ struct HotkeyCoordinatorTests {
     @Test
     func testRecordingNow_builtIn_returnsNilOnSuccess() async {
         let f = makeFixture()
-        f.prompter.nextResponse = "T"
+        f.prompter.nextResponse = inputs("T")
         let error = await f.coordinator.testRecordingNow()
         #expect(error == nil)
-        // Built-in test: one Start Shortcut URL opened.
         #expect(f.opener.openedURLs.count == 1)
         #expect(f.opener.openedURLs[0].queryValue(named: "name") == f.settings.startShortcutName)
     }

@@ -3,11 +3,41 @@
 <plist version="1.0">
 <dict>
     <!--
-        Phase 0 ships with no entitlements. App Sandbox, network.client, and
-        files.user-selected.read-write are added in Phase 8 (hardening) per
-        Claude/implementation-plan.md. Keeping the file in place now means the
-        Xcode project already references it and we just add keys later — no
-        project-file surgery in Phase 8.
+        App Sandbox is enabled in Phase 8 per Claude/implementation-plan.md §9.
+
+        Required entitlements:
+
+        - app-sandbox                      : turn on the sandbox itself.
+        - network.client                   : the transcription client calls
+                                             user-configured HTTPS endpoints
+                                             (Groq, OpenAI, etc.).
+        - files.user-selected.read-write   : the user picks Watch + Output
+                                             folders via NSOpenPanel; we need
+                                             read/write on whatever they pick.
+        - files.bookmarks.app-scope        : security-scoped bookmarks survive
+                                             relaunch and re-grant access to
+                                             the chosen folders.
+
+        Things we deliberately do NOT request:
+
+        - apple-events / temporary-exception.apple-events
+            Audio Hijack control happens via spawning /usr/bin/shortcuts (the
+            macOS Shortcuts CLI), which runs the user-authored Run/Stop Session
+            Shortcut. No Apple Events leave this process.
+
+        - automation.apple-events
+            Same reason.
+
+        - device.audio-input
+            Audio Hijack owns recording. Jot never touches the audio stack.
     -->
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+    <key>com.apple.security.network.client</key>
+    <true/>
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
+    <key>com.apple.security.files.bookmarks.app-scope</key>
+    <true/>
 </dict>
 </plist>

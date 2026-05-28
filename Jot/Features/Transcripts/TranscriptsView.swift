@@ -48,7 +48,7 @@ struct TranscriptsView: View {
         .alert("Move to Trash?", isPresented: deleteConfirmBinding) {
             Button("Move to Trash", role: .destructive) {
                 if let target = confirmingDelete {
-                    Task { await viewModel.moveToTrash(target.url) }
+                    Task { await performMoveToTrash(target: target) }
                 }
                 confirmingDelete = nil
             }
@@ -146,13 +146,22 @@ struct TranscriptsView: View {
     }
 
     private func refresh() async {
-        await viewModel.refresh(outputFolder: outputFolder)
+        guard let url = outputFolder else {
+            await viewModel.refresh(outputFolder: nil)
+            return
+        }
+        await withScopedAccess(url) {
+            await viewModel.refresh(outputFolder: url)
+        }
     }
 
-    /// Resolved Output Folder URL (security-scoped access acquired for the
-    /// duration of this view's lifetime by the PipelineCoordinator when the
-    /// pipeline is running; harmless if not running — the FS still lets us
-    /// list).
+    /// Resolved Output Folder URL. Under App Sandbox the URL alone isn't
+    /// enough to read the folder — every FS-touching call needs to be
+    /// wrapped in `start/stopAccessingSecurityScopedResource()`. That
+    /// pairing lives in `withScopedAccess(_:perform:)` below; the
+    /// `PipelineCoordinator` holds its own long-lived scope while the
+    /// pipeline is running, but TranscriptsView is usable even when the
+    /// pipeline isn't, so we own our own short-lived scope per operation.
     private var outputFolder: URL? {
         guard let data = settings.outputFolderBookmark else { return nil }
         var isStale = false
@@ -162,6 +171,19 @@ struct TranscriptsView: View {
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         )
+    }
+
+    /// Run `perform` while holding security-scoped access on `url`. The
+    /// scope is released as soon as `perform` returns or throws. Use this
+    /// around any FS operation under the Output Folder (list / rename /
+    /// move-to-trash) so the sandbox honors our bookmark grant.
+    private func withScopedAccess<T>(
+        _ url: URL,
+        perform: () async -> T
+    ) async -> T {
+        let didStart = url.startAccessingSecurityScopedResource()
+        defer { if didStart { url.stopAccessingSecurityScopedResource() } }
+        return await perform()
     }
 
     // MARK: - Alert bindings (Bool ↔ Optional state)
@@ -181,7 +203,18 @@ struct TranscriptsView: View {
     }
 
     private func performRename(target: MeetingFolder, name: String) async {
-        _ = await viewModel.rename(target.url, to: name)
+        guard let url = outputFolder else { return }
+        await withScopedAccess(url) {
+            _ = await viewModel.rename(target.url, to: name)
+        }
+        await refresh()
+    }
+
+    private func performMoveToTrash(target: MeetingFolder) async {
+        guard let url = outputFolder else { return }
+        await withScopedAccess(url) {
+            await viewModel.moveToTrash(target.url)
+        }
         await refresh()
     }
 }

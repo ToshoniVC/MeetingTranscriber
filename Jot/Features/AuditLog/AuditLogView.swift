@@ -6,6 +6,7 @@ import SwiftUI
 struct AuditLogView: View {
     @Environment(AuditLogStore.self) private var store
     @Environment(PipelineCoordinator.self) private var pipeline
+    @Environment(ErrorInspector.self) private var inspector
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -41,9 +42,15 @@ struct AuditLogView: View {
                 )
             } else {
                 List(store.entries) { entry in
-                    AuditLogRow(entry: entry) {
-                        Task { await pipeline.retry(url: URL(fileURLWithPath: entry.sourcePath)) }
-                    }
+                    AuditLogRow(
+                        entry: entry,
+                        onRetry: {
+                            Task { await pipeline.retry(url: URL(fileURLWithPath: entry.sourcePath)) }
+                        },
+                        onShowDetails: entry.kind == .failure
+                            ? { inspector.show(from: entry) }
+                            : nil
+                    )
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 }
                 .listStyle(.inset)

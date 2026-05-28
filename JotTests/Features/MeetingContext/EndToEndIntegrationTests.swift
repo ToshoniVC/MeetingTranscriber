@@ -178,7 +178,7 @@ struct AddContextEndToEndIntegrationTests {
         let success = capture.entries.first { $0.kind == .success }
         #expect(success?.contextAttached == true)
         #expect(success?.organizationName == "Acme")
-        #expect(success?.schemaVersion == 4)
+        #expect(success?.schemaVersion == 5)
     }
 
     /// Regression test for the no-orgs path: a user who never opens the

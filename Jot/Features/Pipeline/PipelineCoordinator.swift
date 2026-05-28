@@ -31,6 +31,13 @@ final class PipelineCoordinator {
     /// about batching.
     private let batchAccumulator: MeetingBatchAccumulator?
 
+    /// v0.4.5: list of configured transcription providers. The pipeline
+    /// uses this via `RotatingTranscriber` instead of the legacy
+    /// single-provider fields on `AppSettings`. Nil for test contexts
+    /// that drive the pipeline with a `PipelineConfig`-shaped single
+    /// provider directly.
+    private let providerStore: ProviderStore?
+
     /// Current pipeline (if running). Nil between starts.
     private var pipeline: ProcessingPipeline?
 
@@ -50,13 +57,15 @@ final class PipelineCoordinator {
         auditLog: AuditLogStore,
         menuBar: MenuBarController,
         meetingContextStore: MeetingContextStore? = nil,
-        batchAccumulator: MeetingBatchAccumulator? = nil
+        batchAccumulator: MeetingBatchAccumulator? = nil,
+        providerStore: ProviderStore? = nil
     ) {
         self.settings = settings
         self.auditLog = auditLog
         self.menuBar = menuBar
         self.meetingContextStore = meetingContextStore
         self.batchAccumulator = batchAccumulator
+        self.providerStore = providerStore
     }
 
     // MARK: - Public API
@@ -100,15 +109,22 @@ final class PipelineCoordinator {
     }
 
     /// Suspends until any of the pipeline-relevant `AppSettings` properties
-    /// changes. Uses `withObservationTracking` per-iteration — that's how
-    /// `@Observable` is consumed outside SwiftUI views.
+    /// (or the `ProviderStore`'s providers list) changes. Uses
+    /// `withObservationTracking` per-iteration — that's how `@Observable`
+    /// is consumed outside SwiftUI views.
     private func waitForRelevantChange() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             withObservationTracking {
                 _ = settings.watchFolderBookmark
                 _ = settings.outputFolderBookmark
+                // Legacy single-provider fields still observed for
+                // tests / contexts that don't wire a `ProviderStore`.
                 _ = settings.apiBaseURL
                 _ = settings.modelString
+                // v0.4.5: provider list / order / enable changes
+                // restart the pipeline so the new chain is what the
+                // next file sees.
+                _ = providerStore?.providers
                 _ = settings.notionEnabled
                 _ = settings.notionDatabaseId
                 _ = settings.claudeCodeNotesEnabled
@@ -202,7 +218,8 @@ final class PipelineCoordinator {
                     Task { @MainActor in
                         auditLog.updateClaudeCodeStatus(status, forEntry: entryId)
                     }
-                }
+                },
+                providerSource: providerStore
             )
             try await pipeline.start()
             self.pipeline = pipeline
@@ -239,6 +256,16 @@ final class PipelineCoordinator {
 
     /// Resolve bookmarks + read API config. Returns `nil` if anything
     /// required is missing or resolution fails.
+    ///
+    /// **Gate logic (v0.4.5).** When a `providerStore` is wired the
+    /// pipeline starts as long as at least one enabled provider has
+    /// both valid config AND an API key in the keychain — the rotating
+    /// transcriber will pick from the chain at request time. The
+    /// legacy `apiBaseURL` / `modelString` / `apiKey` fields on
+    /// `PipelineConfig` are populated with safe placeholders in that
+    /// case (the pipeline ignores them when a provider source is set);
+    /// they're still the real gate for test contexts that don't wire
+    /// a store.
     private func makeConfig() -> PipelineConfig? {
         guard let watch = settings.watchFolderBookmark,
               let output = settings.outputFolderBookmark,
@@ -246,6 +273,26 @@ final class PipelineCoordinator {
               let outputURL = resolveBookmark(output)
         else { return nil }
 
+        if let store = providerStore {
+            // Multi-provider gate: any one ready provider unlocks the
+            // pipeline. The rotating transcriber surfaces a typed
+            // error per-meeting if every provider fails at request
+            // time — we don't pre-fail here.
+            let readyExists = store.providers.contains { store.readiness(of: $0) == .ready }
+            guard readyExists else { return nil }
+            return PipelineConfig(
+                watchFolder: watchURL,
+                outputFolder: outputURL,
+                // Placeholder — ignored by ProcessingPipeline when
+                // `providerSource` is set. Kept non-empty so the
+                // struct's validators don't trip.
+                apiBaseURL: URL(string: "https://providers-managed.invalid/")!,
+                model: "providers-managed",
+                apiKey: "providers-managed"
+            )
+        }
+
+        // Legacy single-provider gate (tests / contexts without a store).
         let trimmedURL = settings.apiBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let baseURL = URL(string: trimmedURL), baseURL.scheme != nil else { return nil }
 

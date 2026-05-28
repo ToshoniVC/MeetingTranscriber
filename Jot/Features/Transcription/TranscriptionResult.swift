@@ -34,6 +34,14 @@ struct TranscriptionResult: Sendable, Equatable {
     /// artifact.
     let rawJSON: Data
 
+    /// User-visible name of the provider that produced this result
+    /// (e.g., "OpenAI", "Groq"). v0.4.5+ — empty when the result came
+    /// from a single-provider code path that doesn't know its source
+    /// (legacy test fixtures, the Settings "Test connection" flow).
+    /// Threaded through to the audit log and Notion footer for
+    /// attribution, per the v0.4.5 PRD.
+    var providerName: String = ""
+
     struct Segment: Sendable, Equatable {
         let start: Double
         let end: Double
@@ -88,11 +96,20 @@ struct TranscriptionResult: Sendable, Equatable {
             duration: offset,
             segments: combinedSegments
         )
+        // Provider attribution for a multi-part batch: if every part
+        // landed on the same provider, that's the attribution. If the
+        // rotating transcriber switched providers mid-batch (provider 1
+        // failed on part 2 → fellthrough to provider 2), join them with
+        // " + " so the audit/Notion line is honest about it.
+        let providerNames = parts.map(\.providerName).filter { !$0.isEmpty }
+        var seen = Set<String>()
+        let uniqueOrdered = providerNames.filter { seen.insert($0).inserted }
         return TranscriptionResult(
             text: mergedText,
             duration: offset > 0 ? offset : nil,
             segments: combinedSegments,
-            rawJSON: mergedJSON
+            rawJSON: mergedJSON,
+            providerName: uniqueOrdered.joined(separator: " + ")
         )
     }
 

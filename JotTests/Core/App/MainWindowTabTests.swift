@@ -12,7 +12,11 @@ struct MainTabTests {
 
     @Test
     func allCases_isInExpectedOrder() {
-        #expect(MainTab.allCases == [.transcripts, .auditLog, .settings, .context])
+        // v0.4.6 reorder: Context promoted to third position, Settings
+        // pushed to the bottom — config-style tabs grouped at the end,
+        // day-to-day usage tabs (Transcripts, Audit Log, Context) at
+        // the top.
+        #expect(MainTab.allCases == [.transcripts, .auditLog, .context, .settings])
     }
 
     @Test

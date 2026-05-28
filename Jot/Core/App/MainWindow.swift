@@ -102,8 +102,8 @@ private struct SidebarVersionFooter: View {
 enum MainTab: String, CaseIterable, Identifiable {
     case transcripts
     case auditLog
-    case settings
     case context
+    case settings
 
     var id: Self { self }
 

@@ -5,6 +5,24 @@ Versions are tagged from `main` (`v0.1.0`, `v0.1.1`, …) and built/signed by
 release notes from the `<description>` element in `docs/appcast.xml`, not
 this file — this is the long-form humans-only log.
 
+## v0.2.1 — Start-flow polish
+
+Two small fixes to the v0.2.0 Context flow, per first-day usage:
+
+- **Start-meeting prompt no longer surfaces the main window.** Pressing
+  the recording hotkey while the main window was open in the
+  background would re-front the main window alongside the new
+  meeting prompt. The prompter now orders any visible normal Jot
+  windows out before activating the app, so the only Jot UI on
+  screen during start is the prompt itself.
+- **Meeting folders are prefixed with a timestamp** in
+  `yyyy.MM.dd - HH.mm` form so Finder sorts them chronologically.
+  A "Standup" meeting recorded at 15:30 on 2026-05-28 now files
+  under `2026.05.28 - 15.30 - Standup/`, with matching transcript
+  + audio filenames inside. Only applies to the Jot-rename path
+  (snapshot consumed); files that fall outside any recording
+  window keep their Audio-Hijack-stamped name.
+
 ## v0.2.0 — Context
 
 First feature beyond the foundation app: per-organization profiles plus

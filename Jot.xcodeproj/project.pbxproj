@@ -10,7 +10,6 @@
 		02E4DEB6612EAEEFBD8D242E /* AuditLogStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 216AE69DA548C428D23109BD /* AuditLogStore.swift */; };
 		08F9F939786209ACDA9EC749 /* TranscriptsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44EC94296A6BFE79BDFC39DA /* TranscriptsView.swift */; };
 		09D48416D5796D895D06B658 /* AppSettingsIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CED4791D1BA89CAF006D804 /* AppSettingsIntegrationTests.swift */; };
-		1179E24E3139F9EF580C0887 /* RecordingProcessRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 659486CFB0AC7918BDC67030 /* RecordingProcessRunner.swift */; };
 		1DA10CC9A972277BC5B616F0 /* TranscriptionRequestTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03CD42879A5E6DD978622963 /* TranscriptionRequestTests.swift */; };
 		1E4F8B2F3CF2A8111FA82D64 /* TranscriptionClientIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FDB899C6C4EC86762403B27 /* TranscriptionClientIntegrationTests.swift */; };
 		1EB76DDFC708DBABDE055218 /* ShortcutInvoker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6873D091A11EE8D681512469 /* ShortcutInvoker.swift */; };
@@ -79,6 +78,7 @@
 		D5B027C42726B753B8835658 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70335DFB54D4A0FA6A73BD50 /* Keychain.swift */; };
 		D6FFC310E65A663C775A32F4 /* MainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A86F1ADBC2862697A84BDA /* MainWindow.swift */; };
 		D7B29093D6BCC2A6E8E93B68 /* TranscriptsViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3889E4CC81BA16539834D4C0 /* TranscriptsViewModelTests.swift */; };
+		D8A3DD38EE0566A4A3279796 /* RecordingURLOpener.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F11100474748353695B5D13 /* RecordingURLOpener.swift */; };
 		D9B84B46ADF628CC1939BECF /* FakeHotkeyRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD1F69306197E96589E63350 /* FakeHotkeyRegistrar.swift */; };
 		DD7723E8F1336AA9D2F0B58F /* AuditLogStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0D24EB93716734CA8BF8BF12 /* AuditLogStoreTests.swift */; };
 		E045D0839B5B7BF3A6ACB29E /* EphemeralUserDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF7C349C6EB555B97BFA6D2C /* EphemeralUserDefaults.swift */; };
@@ -147,7 +147,6 @@
 		63904256978BB005A3739559 /* Jot.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Jot.entitlements; sourceTree = "<group>"; };
 		63F09C2FFA0D35CD63FD6833 /* LoginItemControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginItemControllerTests.swift; sourceTree = "<group>"; };
 		650C068973B8CBDB74CFE6A4 /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
-		659486CFB0AC7918BDC67030 /* RecordingProcessRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingProcessRunner.swift; sourceTree = "<group>"; };
 		6731DA96C0D07E749082ACE9 /* FakeLoginItemControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FakeLoginItemControlling.swift; sourceTree = "<group>"; };
 		67EC6066A23E8621F7F4BC6C /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
 		6873D091A11EE8D681512469 /* ShortcutInvoker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShortcutInvoker.swift; sourceTree = "<group>"; };
@@ -168,6 +167,7 @@
 		85D7D085ECF0C2D44D33B1D0 /* DebugModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugModeTests.swift; sourceTree = "<group>"; };
 		8DB56050E77D0011B0CB1E6C /* AudioHijackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioHijackController.swift; sourceTree = "<group>"; };
 		8E837917D8AFED1FE97C157E /* SettingsValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsValidation.swift; sourceTree = "<group>"; };
+		8F11100474748353695B5D13 /* RecordingURLOpener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingURLOpener.swift; sourceTree = "<group>"; };
 		90E6AA96551146684933B40E /* FolderWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderWatcher.swift; sourceTree = "<group>"; };
 		950234DF973E94D0673ACA2E /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
 		95F9E11967B48E4D9666D28C /* PipelineCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineCoordinatorTests.swift; sourceTree = "<group>"; };
@@ -605,7 +605,7 @@
 				6731DA96C0D07E749082ACE9 /* FakeLoginItemControlling.swift */,
 				1E486522DE41FE6A2FC00432 /* InMemoryKeychain.swift */,
 				287757359CA389D80C39B9B5 /* MockURLProtocol.swift */,
-				659486CFB0AC7918BDC67030 /* RecordingProcessRunner.swift */,
+				8F11100474748353695B5D13 /* RecordingURLOpener.swift */,
 				E43B740D303F1F18F5A48671 /* RecordingWorkspaceActions.swift */,
 				0D42E6B4DE67227B5CBF0222 /* StubMeetingNamePrompter.swift */,
 			);
@@ -873,7 +873,7 @@
 				F84C6723662ED208D8F42C7F /* PipelineCoordinatorTests.swift in Sources */,
 				F3DDE8F0C48071E18289DEF9 /* PipelineIntegrationTests.swift in Sources */,
 				3CEDB3A932561910FF9BC046 /* ProcessedFilesLedgerTests.swift in Sources */,
-				1179E24E3139F9EF580C0887 /* RecordingProcessRunner.swift in Sources */,
+				D8A3DD38EE0566A4A3279796 /* RecordingURLOpener.swift in Sources */,
 				3FC567457E7EFF9A1383F51E /* RecordingWorkspaceActions.swift in Sources */,
 				7FEBF8449A347B30AB62E554 /* SettingsFeatureSmokeTests.swift in Sources */,
 				3FED7A7047D3FF7B5EFEB1B2 /* SettingsValidationTests.swift in Sources */,

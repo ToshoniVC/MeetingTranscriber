@@ -11,13 +11,17 @@ enum AudioHijackRecordingError: Error, Equatable {
     /// so before the call). Surfaces an actionable message to the user.
     case audioHijackNotInstalled
 
-    /// `shortcuts run` returned a non-zero exit. Most common cause: the
-    /// named Shortcut doesn't exist yet. The `stderr` field is included
-    /// for the "Copy details" affordance.
-    case shortcutFailed(name: String, stderr: String)
-
-    /// Underlying `Process.run()` failed before `shortcuts` could execute.
-    case launchFailed(String)
+    /// Couldn't hand the `shortcuts://run-shortcut?name=…` URL off to
+    /// macOS — usually because the name was empty or, vanishingly rare,
+    /// Shortcuts isn't installed. The `detail` is the underlying message
+    /// from `NSWorkspace.open`.
+    ///
+    /// Note: this case does **not** fire when the named Shortcut doesn't
+    /// exist in the user's library. URL-scheme invocation only tells us
+    /// whether the URL was accepted; the Shortcut's runtime success is
+    /// invisible to us. Mis-named Shortcuts surface their own error
+    /// inside the Shortcuts app, not back to Jot.
+    case shortcutOpenFailed(name: String, detail: String)
 
     var userFacingMessage: String {
         switch self {
@@ -25,13 +29,9 @@ enum AudioHijackRecordingError: Error, Equatable {
             return "Recording cancelled."
         case .audioHijackNotInstalled:
             return "Audio Hijack is not installed. Install it from rogueamoeba.com/audiohijack/."
-        case .shortcutFailed(let name, let stderr):
-            // The most common cause is "no Shortcut by that name exists", so
-            // give the user the next-step they need.
-            let suffix = stderr.isEmpty ? "" : " (\(stderr.prefix(160)))"
-            return "Couldn't run Shortcut '\(name)'. Create it in the Shortcuts app, or rename it in Settings to match.\(suffix)"
-        case .launchFailed(let message):
-            return "Couldn't launch /usr/bin/shortcuts: \(message)"
+        case .shortcutOpenFailed(let name, let detail):
+            let suffix = detail.isEmpty ? "" : " (\(detail.prefix(160)))"
+            return "Couldn't open Shortcut '\(name)' via Shortcuts. Make sure the Shortcuts app is installed and the Shortcut exists.\(suffix)"
         }
     }
 }
@@ -82,10 +82,17 @@ enum RecordingAction: Equatable, Sendable {
 ///
 /// Implementation: AH4 has **no AppleScript dictionary** — it exposes a
 /// `Run/Stop Session` App Intent (and a few others) that are only reachable
-/// via the macOS Shortcuts app. So Jot runs two user-authored Shortcuts via
-/// `/usr/bin/shortcuts run …`:
+/// via the macOS Shortcuts app. So Jot runs two user-authored Shortcuts by
+/// asking macOS to open `shortcuts://run-shortcut?name=…` URLs via
+/// `NSWorkspace.open`. The Shortcuts app then runs the workflow in its
+/// own (non-sandboxed) process:
 ///   - `startShortcutName` — runs `Run/Stop Session` with `state = running`
 ///   - `stopShortcutName`  — runs `Run/Stop Session` with `state = stopped`
+///
+/// We previously spawned `/usr/bin/shortcuts` via `Process`, but the CLI
+/// inherits our App Sandbox and crashes on a `Data.write(to:)` with a nil
+/// URL when it tries to touch paths that don't exist inside our container.
+/// URL-scheme invocation sidesteps the issue entirely.
 ///
 /// The hotkey acts as a **toggle**: pressing it while Jot's local view says
 /// "recording" runs the stop Shortcut (no prompt). Pressing it while idle
@@ -168,10 +175,8 @@ final class AudioHijackController {
             try await invoker.run(shortcutName: name, input: input)
         } catch let error as ShortcutError {
             switch error {
-            case .nonZeroExit(_, let stderr):
-                throw AudioHijackRecordingError.shortcutFailed(name: name, stderr: stderr)
-            case .launchFailed(let message):
-                throw AudioHijackRecordingError.launchFailed(message)
+            case .openFailed(let detail):
+                throw AudioHijackRecordingError.shortcutOpenFailed(name: name, detail: detail)
             }
         }
     }

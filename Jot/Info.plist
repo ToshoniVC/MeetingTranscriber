@@ -24,5 +24,38 @@
     <true/>
     <key>NSHumanReadableCopyright</key>
     <string></string>
+
+    <!--
+        Sparkle autoupdater (Phase 9). Release builds read these to find the
+        appcast and verify signatures; Debug builds compile Sparkle out via
+        `#if DEBUG` in Core/Updates/SparkleUpdater.swift, so these keys are
+        inert there.
+
+        SUFeedURL points at GitHub Pages hosting from `docs/appcast.xml`.
+        The release workflow regenerates that file on every `v*` tag.
+
+        SUPublicEDKey is the base64-encoded EdDSA public half of the keypair
+        whose private half lives in the SPARKLE_PRIVATE_KEY GitHub secret. To
+        bootstrap a first release, run Sparkle's `generate_keys` on a Mac
+        once, paste the printed public key below, and save the private key
+        as the repo secret. See README.md → "Cutting a release".
+    -->
+    <key>SUFeedURL</key>
+    <string>https://toshonivc.github.io/MeetingTranscriber/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>REPLACE_WITH_PUBLIC_ED_KEY_FROM_GENERATE_KEYS</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
+    <key>SUEnableInstallerLauncherService</key>
+    <true/>
+    <!--
+        Don't auto-install — require the user to click "Install Update" in
+        the Sparkle dialog. Safer for ad-hoc-signed builds where the binary
+        identity isn't Apple-vouched.
+    -->
+    <key>SUAllowsAutomaticUpdates</key>
+    <false/>
 </dict>
 </plist>

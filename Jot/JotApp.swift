@@ -19,6 +19,7 @@ struct JotApp: App {
     @State private var audioHijackController: AudioHijackController
     @State private var errorInspector: ErrorInspector
     @State private var debugMode: DebugMode
+    @State private var updater: SparkleUpdater
 
     init() {
         let menuBar = MenuBarController()
@@ -47,6 +48,7 @@ struct JotApp: App {
         let loginItem = LoginItemController(manager: LoginItemManager())
         let errorInspector = ErrorInspector()
         let debugMode = DebugMode()
+        let updater = SparkleUpdater()
         self._menuBar = State(initialValue: menuBar)
         self._settings = State(initialValue: settings)
         self._auditLog = State(initialValue: auditLog)
@@ -57,6 +59,7 @@ struct JotApp: App {
         self._audioHijackController = State(initialValue: ahController)
         self._errorInspector = State(initialValue: errorInspector)
         self._debugMode = State(initialValue: debugMode)
+        self._updater = State(initialValue: updater)
     }
 
     var body: some Scene {
@@ -88,6 +91,7 @@ struct JotApp: App {
                 .environment(audioHijackController)
                 .environment(errorInspector)
                 .environment(debugMode)
+                .environment(updater)
                 .frame(minWidth: 760, minHeight: 480)
                 .task {
                     await pipeline.bootstrap()

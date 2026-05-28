@@ -29,6 +29,16 @@ configs:
   Debug: debug
   Release: release
 
+# Sparkle autoupdater — Release-only. Debug builds compile it out (see
+# Jot/Core/Updates/SparkleUpdater.swift) so the Dev app never tries to
+# replace itself while you're iterating in Xcode. Pinned to a 2.x major
+# minimum because Sparkle 2 is the macOS 11+ rewrite with the XPC-based
+# installer.
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.6.0"
+
 settings:
   base:
     SWIFT_VERSION: "5.9"
@@ -49,6 +59,8 @@ targets:
   Jot:
     type: application
     platform: macOS
+    dependencies:
+      - package: Sparkle
     sources:
       - path: Jot
         excludes:

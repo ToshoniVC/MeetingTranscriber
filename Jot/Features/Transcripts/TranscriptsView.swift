@@ -212,7 +212,9 @@ struct TranscriptsView: View {
 
     private func performMoveToTrash(target: MeetingFolder) async {
         guard let url = outputFolder else { return }
-        await withScopedAccess(url) {
+        // Discard the Void result explicitly so Release's stricter
+        // "unused result" warning stays quiet.
+        _ = await withScopedAccess(url) {
             await viewModel.moveToTrash(target.url)
         }
         await refresh()

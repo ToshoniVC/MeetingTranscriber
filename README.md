@@ -4,6 +4,22 @@ The repository for **Jot** — a native macOS menu-bar utility that watches a fo
 
 ## Using Jot
 
+### Installing Jot
+
+1. Grab the latest `Jot-X.Y.Z.zip` from the [Releases](https://github.com/ToshoniVC/MeetingTranscriber/releases) page.
+2. Unzip → drag `Jot.app` into `/Applications/`.
+3. **First launch only:** because builds are ad-hoc-signed (not Apple-notarized), macOS Gatekeeper will block the first open. **Right-click `Jot.app` → Open → Open** to confirm. Subsequent launches work normally.
+4. Jot appears in the menu bar (no Dock icon). Click it → **Open Jot** to bring up the main window.
+
+### Updates
+
+Jot uses [Sparkle](https://sparkle-project.org) to check for new releases:
+
+- **Automatic.** On launch and every 24 hours, Jot pulls `https://toshonivc.github.io/MeetingTranscriber/appcast.xml`. If a newer signed `.zip` is published, you see a Sparkle dialog with the changelog + an Install button.
+- **Manual.** Settings → **System** → **Check for Updates…**.
+- Updates are signed with EdDSA before publishing — Sparkle refuses to install anything whose signature doesn't verify against the public key baked into the app.
+- `Jot Dev` (the debug build) ships with Sparkle compiled out. Update it by re-running with ⌘R in Xcode.
+
 ### What you need
 
 - macOS 14 Sonoma or newer.
@@ -82,3 +98,55 @@ xcodebuild -project Jot.xcodeproj -scheme Jot -configuration Release build
 - **`Jot.app`** — Release build, bundle `com.toshonivc.jot`, waveform icon. The production install (post-Phase 9 it'll be auto-distributed via Sparkle + GitHub Releases).
 
 Both can run side-by-side in the menu bar. See [`Claude/development-lifecycle.md`](Claude/development-lifecycle.md) for the full lifecycle and versioning model.
+
+### Continuous Integration
+
+Two GitHub Actions workflows:
+
+- **`.github/workflows/tests.yml`** — runs `xcodebuild test` on every push and PR. Configure it as a required check on `main` in Settings → Branches → Branch protection.
+- **`.github/workflows/release.yml`** — fires on `v*` tags. Builds Release, ad-hoc signs, zips, Sparkle-signs the zip with `SPARKLE_PRIVATE_KEY`, creates a GitHub Release, regenerates `docs/appcast.xml`, and pushes the appcast back to `main` with `[skip ci]`.
+
+### Cutting a release
+
+One-time setup (do these once, before the first `v*` tag):
+
+1. **Generate Sparkle's EdDSA keypair.** After building the Jot scheme once (so SPM resolves Sparkle), the `generate_keys` tool lives in your DerivedData:
+
+   ```bash
+   find ~/Library/Developer/Xcode/DerivedData/Jot-*/SourcePackages -name generate_keys -type f
+   # then run the path it prints:
+   $TOOL_PATH
+   ```
+
+   It writes the **private** key to your Keychain and prints the **public** key to stdout, formatted as a base64 string.
+
+2. **Commit the public key.** Open `Jot/Info.plist` and replace the `REPLACE_WITH_PUBLIC_ED_KEY_FROM_GENERATE_KEYS` placeholder for `SUPublicEDKey` with the printed value. Commit.
+
+3. **Stash the private key as a GitHub secret.** Use Sparkle's helper to export the private key in the format `release.yml` expects, then paste into Settings → Secrets and variables → Actions:
+
+   ```bash
+   $TOOL_PATH -x ./private-key.txt   # exports the matching private key
+   pbcopy < ./private-key.txt        # copy to clipboard
+   rm ./private-key.txt              # never commit this file
+   ```
+
+   Add a secret named **`SPARKLE_PRIVATE_KEY`** and paste.
+
+4. **Enable GitHub Pages.** Repo Settings → Pages → Source = "Deploy from a branch" → Branch = `main`, Folder = `/docs` → Save. Wait ~1 minute, then verify `https://toshonivc.github.io/MeetingTranscriber/appcast.xml` returns the (currently empty) feed.
+
+5. **Verify branch protection.** Settings → Branches → Branch protection rules for `main` → add the **Tests** workflow as a required status check, and (optionally) require PR reviews.
+
+Day-to-day release flow:
+
+```bash
+# from main, after merging the change you want to ship:
+git pull
+git tag v0.1.0
+git push origin v0.1.0
+# release.yml runs for ~5 minutes; check Actions → Release.
+# When green: a new GitHub Release exists, docs/appcast.xml is updated,
+# and every running install will see the update at its next 24h tick
+# (or immediately, via Settings → Check for Updates…).
+```
+
+Versioning convention: the **tag** (`v0.1.0`) drives `MARKETING_VERSION` (user-visible). The **build number** (`CFBundleVersion`) is `git rev-list --count HEAD` — monotonic, never resets, never collides.

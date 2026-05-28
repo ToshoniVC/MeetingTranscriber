@@ -88,7 +88,28 @@ actor ProcessingPipeline {
     ///
     /// Phase D uses only `snapshot.meetingName` (for rename); Phase F adds
     /// the prompt-compile + send step using the same snapshot.
+    ///
+    /// Only used by the **single-file** path. The batched path
+    /// (`processBatch`) gets its snapshot off the `MeetingBatch` itself,
+    /// which the `MeetingBatchAccumulator` populated when recording
+    /// started.
     private let consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)?
+
+    /// Optional batch accumulator. When set, every stable URL from the
+    /// watcher is routed through it first — files that fall inside an
+    /// active recording window get buffered into a `MeetingBatch` and
+    /// emit only after the recording stops + a settle period. Files
+    /// outside any window emit as `.single` and take the existing
+    /// per-file path. Nil for non-batching test contexts.
+    private let batchAccumulator: MeetingBatchAccumulator?
+
+    /// Called by the batch path after it finishes (success or failure) so
+    /// the `MeetingContextStore`'s `pending` entry is cleared — the batch
+    /// already grabbed the snapshot at `noteRecordingStarted` time, and
+    /// leaving `pending` set would mis-attribute a late-arriving stray
+    /// file to the just-flushed meeting via the legacy `consume` path.
+    /// Nil for non-batching contexts.
+    private let clearPendingMeetingContext: (@Sendable () async -> Void)?
 
     /// How to handle Notion post-success — either skip with a recorded
     /// reason or attempt the write via the supplied writer. Nil means
@@ -128,6 +149,8 @@ actor ProcessingPipeline {
         onStateChange: @escaping @Sendable (PipelineState) -> Void,
         onAuditEntry: @escaping @Sendable (AuditLogEntry) -> Void,
         consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)? = nil,
+        batchAccumulator: MeetingBatchAccumulator? = nil,
+        clearPendingMeetingContext: (@Sendable () async -> Void)? = nil,
         notionMode: NotionPipelineMode? = nil,
         onNotionStatusChange: (@Sendable (UUID, NotionStatus) -> Void)? = nil,
         claudeCodeMode: ClaudeCodePipelineMode? = nil,
@@ -140,6 +163,8 @@ actor ProcessingPipeline {
         self.onStateChange = onStateChange
         self.onAuditEntry = onAuditEntry
         self.consumeMeetingContext = consumeMeetingContext
+        self.batchAccumulator = batchAccumulator
+        self.clearPendingMeetingContext = clearPendingMeetingContext
         self.notionMode = notionMode
         self.onNotionStatusChange = onNotionStatusChange
         self.claudeCodeMode = claudeCodeMode
@@ -162,9 +187,19 @@ actor ProcessingPipeline {
             message: "Pipeline started — watching \(config.watchFolder.lastPathComponent)"
         ))
 
+        // Wire the accumulator's emitter back to ourselves so a `.batch`
+        // becomes `processBatch(_:)` and a `.single` becomes the existing
+        // `process(url:)` path. Done here (not in init) so the closure
+        // sees a fully-initialized pipeline.
+        if let batchAccumulator {
+            await batchAccumulator.setEmitter { [weak self] item in
+                await self?.handleWorkItem(item)
+            }
+        }
+
         consumerTask = Task { [weak self] in
             for await url in stream {
-                await self?.process(url: url)
+                await self?.routeFromWatcher(url)
             }
             await self?.handleStreamEnd()
         }
@@ -183,8 +218,35 @@ actor ProcessingPipeline {
         // cancelled Notion write is silent.
         for task in notionTasks.values { task.cancel() }
         notionTasks.removeAll()
+        // Detach the accumulator's emitter — recording-session state
+        // survives a settings-change-induced pipeline restart, but events
+        // fired between stop and the next start would land on a torn-down
+        // pipeline. The next `start()` rebinds.
+        await batchAccumulator?.unsetEmitter()
         await watcher.stop()
         onStateChange(.notConfigured)
+    }
+
+    /// Route a stable URL from the watcher. When a batch accumulator is
+    /// wired, every URL flows through it; otherwise we fall through to
+    /// the legacy single-file path (preserves existing test wiring).
+    private func routeFromWatcher(_ url: URL) async {
+        guard let batchAccumulator else {
+            await process(url: url)
+            return
+        }
+        let creationDate = fileCreationDate(of: url) ?? Date()
+        await batchAccumulator.ingest(url, creationDate: creationDate)
+    }
+
+    /// Dispatch a work item produced by the accumulator's emitter.
+    private func handleWorkItem(_ item: PipelineWorkItem) async {
+        switch item {
+        case .single(let url):
+            await process(url: url)
+        case .batch(let batch):
+            await processBatch(batch)
+        }
     }
 
     /// Re-process a file the user clicked Retry on. The file is still in the
@@ -305,6 +367,171 @@ actor ProcessingPipeline {
         } catch {
             recordFailure(url: workingURL, message: error.localizedDescription, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
         }
+    }
+
+    // MARK: - Per-meeting (multi-part) processing
+
+    /// Process a `MeetingBatch` — a single meeting whose recording Audio
+    /// Hijack split into multiple files. All parts share the snapshot
+    /// the accumulator captured at `noteRecordingStarted` time; they're
+    /// transcribed in chronological order, the transcripts are joined
+    /// with a blank line, and the result lands as a single meeting
+    /// folder + audit row + Notion page.
+    ///
+    /// On failure of any part's transcription or the organize step, the
+    /// whole batch is recorded as one failure row referencing the first
+    /// part — the other parts stay in the Watch Folder for retry.
+    private func processBatch(_ batch: MeetingBatch) async {
+        let startTime = Date()
+        let snapshot = batch.snapshot
+        guard let firstPart = batch.parts.first else {
+            // Accumulator should never emit an empty batch, but guard
+            // defensively rather than crashing the actor.
+            return
+        }
+
+        onStateChange(.processing(firstPart))
+
+        // 1. Rename each part with the meeting name and a "(part N)"
+        // suffix for N > 1. Part 1 keeps the bare meeting-named filename
+        // so the meeting folder + transcript pick it up via
+        // `FileOrganizer`'s `baseName` lookup. Best-effort: a failed
+        // rename falls back to the original URL.
+        let renamedParts = await renameParts(batch.parts, snapshot: snapshot)
+
+        let prompt = snapshot.resolvedCompiledContext.isEmpty
+            ? nil
+            : snapshot.resolvedCompiledContext
+        Log.pipeline.info("Batch processing \(renamedParts.count, privacy: .public) parts; prompt attached: \(prompt != nil ? "yes" : "no", privacy: .public)")
+
+        do {
+            // 2. Transcribe each part in order. Same prompt for every
+            // part — the compiled context is the user's whole-meeting
+            // intent and applies to all parts.
+            var transcripts: [String] = []
+            transcripts.reserveCapacity(renamedParts.count)
+            for part in renamedParts {
+                let text = try await transcriptionClient.transcribe(
+                    audio: part,
+                    baseURL: config.apiBaseURL,
+                    model: config.model,
+                    apiKey: config.apiKey,
+                    prompt: prompt
+                )
+                transcripts.append(text)
+            }
+
+            // 3. Join with a blank line between parts — keeps the
+            // transcript clean for downstream Claude Code use (per the
+            // v0.4.1 design choice).
+            let combinedTranscript = transcripts.joined(separator: "\n\n")
+
+            // 4. Organize: one meeting folder containing all parts + the
+            // combined transcript + context.md.
+            let meetingFolder = try await fileOrganizer.organize(
+                audioParts: renamedParts,
+                transcript: combinedTranscript,
+                context: prompt,
+                outputRoot: config.outputFolder
+            )
+
+            // 5. Watcher ledger cleanup for every part.
+            for part in renamedParts {
+                await watcher.forget(part)
+            }
+
+            // 6. One success audit entry covering the whole batch.
+            let ms = Int(Date().timeIntervalSince(startTime) * 1000)
+            let entryId = UUID()
+            let initialStatus = initialNotionStatus()
+            let initialClaudeCodeStatus = initialClaudeCodeStatus()
+            let partCount = renamedParts.count
+            onAuditEntry(.init(
+                id: entryId,
+                kind: .success,
+                sourcePath: firstPart.path(percentEncoded: false),
+                message: "Transcribed and filed (\(partCount) parts) → \(meetingFolder.lastPathComponent)",
+                durationMs: ms,
+                retryable: false,
+                contextAttached: prompt != nil,
+                organizationName: snapshot.organizationName,
+                notionStatus: initialStatus,
+                claudeCodeStatus: initialClaudeCodeStatus
+            ))
+            onStateChange(.idle)
+
+            // 7. One Notion write for the whole meeting.
+            if case .attempt(let notionConfig, let writer) = notionMode {
+                scheduleNotionWrite(
+                    entryId: entryId,
+                    config: notionConfig,
+                    writer: writer,
+                    meetingName: snapshot.meetingName,
+                    transcript: combinedTranscript,
+                    additionalContext: snapshot.resolvedCompiledContext
+                )
+            }
+
+        } catch let error as TranscriptionError {
+            recordFailure(url: firstPart, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
+        } catch let error as FileOrganizerError {
+            recordFailure(url: firstPart, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
+        } catch is CancellationError {
+            return
+        } catch {
+            recordFailure(url: firstPart, message: error.localizedDescription, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
+        }
+
+        // The accumulator's snapshot has done its job. Tell the store to
+        // drop its `pending` entry so a late stray file (one that lands
+        // after the settle period) can't accidentally inherit this
+        // meeting's name + context via the legacy `consume` path.
+        await clearPendingMeetingContext?()
+    }
+
+    /// Rename each split part using the meeting name + timestamp from the
+    /// first part's creation date. Part 1 gets the bare
+    /// `<timestamp> - <name>.<ext>` form; parts 2..N get
+    /// `<timestamp> - <name> (part N).<ext>`. Returns the post-rename
+    /// URLs in the same order; any part whose rename failed falls back
+    /// to its original URL.
+    private func renameParts(_ parts: [URL], snapshot: MeetingContextSnapshot) async -> [URL] {
+        guard !parts.isEmpty else { return parts }
+        guard let safeName = MeetingContextStore.sanitizedFilenameComponent(snapshot.meetingName) else {
+            // Can't form a meeting name — keep original filenames so the
+            // organize step still picks up all parts (the folder name
+            // will fall back to the first part's existing basename).
+            return parts
+        }
+        let timestamp = Self.folderTimestamp(for: fileCreationDate(of: parts[0]) ?? Date())
+        let parent = parts[0].deletingLastPathComponent()
+
+        var out: [URL] = []
+        out.reserveCapacity(parts.count)
+        for (index, part) in parts.enumerated() {
+            let partLabel = index == 0 ? "" : " (part \(index + 1))"
+            let baseName = "\(timestamp) - \(safeName)\(partLabel)"
+            let ext = part.pathExtension
+            let target = uniqueAudioURL(under: parent, baseName: baseName, ext: ext)
+
+            await watcher.preRecord(target)
+            do {
+                try FileManager.default.moveItem(at: part, to: target)
+                await watcher.forget(part)
+                onAuditEntry(.init(
+                    kind: .info,
+                    sourcePath: target.path(percentEncoded: false),
+                    message: "Renamed \(part.lastPathComponent) → \(target.lastPathComponent) (meeting name)"
+                ))
+                Log.pipeline.info("Renamed \(part.lastPathComponent, privacy: .public) → \(target.lastPathComponent, privacy: .public)")
+                out.append(target)
+            } catch {
+                await watcher.forget(target)
+                Log.pipeline.warning("Batch rename failed for \(part.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                out.append(part)
+            }
+        }
+        return out
     }
 
     /// Ask `consumeMeetingContext` for a snapshot matching `url`'s creation

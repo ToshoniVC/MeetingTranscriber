@@ -24,6 +24,13 @@ final class PipelineCoordinator {
     private let menuBar: MenuBarController
     private let meetingContextStore: MeetingContextStore?
 
+    /// Long-lived (app-lifetime) accumulator that groups Audio-Hijack-
+    /// split files into one `MeetingBatch`. Owned by `JotApp` and
+    /// passed in here so its session state survives a settings-change-
+    /// induced pipeline restart. Nil for test contexts that don't care
+    /// about batching.
+    private let batchAccumulator: MeetingBatchAccumulator?
+
     /// Current pipeline (if running). Nil between starts.
     private var pipeline: ProcessingPipeline?
 
@@ -42,12 +49,14 @@ final class PipelineCoordinator {
         settings: AppSettings,
         auditLog: AuditLogStore,
         menuBar: MenuBarController,
-        meetingContextStore: MeetingContextStore? = nil
+        meetingContextStore: MeetingContextStore? = nil,
+        batchAccumulator: MeetingBatchAccumulator? = nil
     ) {
         self.settings = settings
         self.auditLog = auditLog
         self.menuBar = menuBar
         self.meetingContextStore = meetingContextStore
+        self.batchAccumulator = batchAccumulator
     }
 
     // MARK: - Public API
@@ -147,14 +156,21 @@ final class PipelineCoordinator {
         do {
             let watcher = try await FolderWatcher(folderURL: config.watchFolder)
             let consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)?
+            let clearPendingMeetingContext: (@Sendable () async -> Void)?
             if let store = meetingContextStore {
                 consumeMeetingContext = { creationDate in
                     await MainActor.run {
                         store.consume(forFileCreatedAt: creationDate)
                     }
                 }
+                clearPendingMeetingContext = {
+                    await MainActor.run {
+                        store.clearPending()
+                    }
+                }
             } else {
                 consumeMeetingContext = nil
+                clearPendingMeetingContext = nil
             }
             let notionMode = makeNotionMode()
             let claudeCodeMode = makeClaudeCodeMode()
@@ -173,6 +189,8 @@ final class PipelineCoordinator {
                     }
                 },
                 consumeMeetingContext: consumeMeetingContext,
+                batchAccumulator: batchAccumulator,
+                clearPendingMeetingContext: clearPendingMeetingContext,
                 notionMode: notionMode,
                 onNotionStatusChange: { entryId, status in
                     Task { @MainActor in

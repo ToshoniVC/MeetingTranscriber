@@ -32,11 +32,19 @@ struct JotApp: App {
         // and PipelineCoordinator (queries it when a new file lands to
         // pull the meeting name + compiled context).
         let meetingContextStore = MeetingContextStore()
+        // Shared between HotkeyCoordinator (drives session start/stop
+        // events) and PipelineCoordinator (wires its emitter to the
+        // pipeline). Long-lived so session state survives a
+        // settings-change-induced pipeline restart. Added in v0.4.1 so
+        // Audio Hijack's "split at 20 MB" recordings produce one
+        // meeting / one Notion page instead of N independent ones.
+        let batchAccumulator = MeetingBatchAccumulator()
         let pipeline = PipelineCoordinator(
             settings: settings,
             auditLog: auditLog,
             menuBar: menuBar,
-            meetingContextStore: meetingContextStore
+            meetingContextStore: meetingContextStore,
+            batchAccumulator: batchAccumulator
         )
         let audioHijack = AudioHijackPresence()
         let invoker = ShortcutInvoker()
@@ -53,7 +61,8 @@ struct JotApp: App {
             menuBar: menuBar,
             auditLog: auditLog,
             organizations: organizations,
-            meetingContextStore: meetingContextStore
+            meetingContextStore: meetingContextStore,
+            batchAccumulator: batchAccumulator
         )
         let loginItem = LoginItemController(manager: LoginItemManager())
         let errorInspector = ErrorInspector()

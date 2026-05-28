@@ -158,4 +158,43 @@ struct MeetingContextStoreTests {
         store.reset()
         #expect(store.pending == nil)
     }
+
+    // MARK: - pendingStartedAt (v0.4.7 AH-rename anchor)
+
+    @Test
+    func pendingStartedAt_returnsNilWhenIdle() {
+        let store = MeetingContextStore()
+        #expect(store.pendingStartedAt() == nil)
+    }
+
+    @Test
+    func pendingStartedAt_returnsStartTimeWhileRecording() {
+        let store = MeetingContextStore()
+        let startTime = Date()
+        store.recordStarted(meetingName: "Demo", at: startTime)
+        #expect(store.pendingStartedAt() == startTime)
+    }
+
+    @Test
+    func pendingStartedAt_doesNotConsumePending() {
+        // Peek must leave `pending` intact so the legacy single-file
+        // consume path still works after the pipeline relocates a file.
+        let store = MeetingContextStore()
+        let startTime = Date()
+        store.recordStarted(meetingName: "Demo", at: startTime)
+        _ = store.pendingStartedAt()
+        _ = store.pendingStartedAt()
+        #expect(store.pending != nil)
+    }
+
+    @Test
+    func pendingStartedAt_clearsAndReturnsNilWhenExpired() {
+        // Same stale-window rule as `peek` — a pending entry older than
+        // `maxAge` is cleared and returns nil.
+        let store = MeetingContextStore()
+        let longAgo = Date(timeIntervalSinceNow: -5 * 60 * 60) // 5h > maxAge (4h)
+        store.recordStarted(meetingName: "Demo", at: longAgo)
+        #expect(store.pendingStartedAt() == nil)
+        #expect(store.pending == nil)
+    }
 }

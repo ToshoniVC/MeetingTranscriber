@@ -149,6 +149,26 @@ final class MeetingContextStore {
         pending = nil
     }
 
+    /// Non-consuming peek at the currently-pending recording's `startedAt`.
+    /// Returns nil when no recording is in flight, or when the pending
+    /// entry has aged past `maxAge` (in which case it's cleared, matching
+    /// `peek(forFileCreatedAt:)`'s stale-window behavior).
+    ///
+    /// Used by `ProcessingPipeline.relocateMissingFile` to anchor a
+    /// parent-directory scan when the URL the watcher emitted no longer
+    /// exists — Audio Hijack can rename the recording after stop based
+    /// on its Recorder block filename template, leaving us looking at a
+    /// stale path. With this anchor we can find the actual file by
+    /// creation-date proximity instead of failing with "file not found".
+    func pendingStartedAt(now: Date = Date()) -> Date? {
+        guard let entry = pending else { return nil }
+        if now.timeIntervalSince(entry.startedAt) > Self.maxAge {
+            pending = nil
+            return nil
+        }
+        return entry.startedAt
+    }
+
     /// Clear any pending entry without consuming it. Used by callers that
     /// know the snapshot is no longer wanted (e.g., user-cancelled flows)
     /// and by tests.

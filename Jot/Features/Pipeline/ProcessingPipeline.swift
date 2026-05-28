@@ -95,6 +95,16 @@ actor ProcessingPipeline {
     /// started.
     private let consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)?
 
+    /// v0.4.7: non-consuming peek at the currently-pending recording's
+    /// `startedAt`. Used to anchor `relocateMissingFile` when the URL
+    /// the watcher emitted no longer exists on disk — Audio Hijack can
+    /// rename the file post-stop based on its Recorder block filename
+    /// template, leaving us with a stale path. With this anchor we
+    /// can scan the parent dir for an audio file whose creation date
+    /// is within slop of the recording's start, instead of failing
+    /// outright. Nil in test contexts that don't model recordings.
+    private let pendingRecordingStartedAt: (@Sendable () async -> Date?)?
+
     /// Optional batch accumulator. When set, every stable URL from the
     /// watcher is routed through it first — files that fall inside an
     /// active recording window get buffered into a `MeetingBatch` and
@@ -156,6 +166,7 @@ actor ProcessingPipeline {
         onStateChange: @escaping @Sendable (PipelineState) -> Void,
         onAuditEntry: @escaping @Sendable (AuditLogEntry) -> Void,
         consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)? = nil,
+        pendingRecordingStartedAt: (@Sendable () async -> Date?)? = nil,
         batchAccumulator: MeetingBatchAccumulator? = nil,
         clearPendingMeetingContext: (@Sendable () async -> Void)? = nil,
         notionMode: NotionPipelineMode? = nil,
@@ -171,6 +182,7 @@ actor ProcessingPipeline {
         self.onStateChange = onStateChange
         self.onAuditEntry = onAuditEntry
         self.consumeMeetingContext = consumeMeetingContext
+        self.pendingRecordingStartedAt = pendingRecordingStartedAt
         self.batchAccumulator = batchAccumulator
         self.clearPendingMeetingContext = clearPendingMeetingContext
         self.notionMode = notionMode
@@ -298,6 +310,14 @@ actor ProcessingPipeline {
     private func process(url: URL) async {
         let startTime = Date()
         onStateChange(.processing(url))
+
+        // 0-pre. Audio Hijack may have renamed the file after the watcher
+        // saw it stable but before we got to it (Recorder block filename
+        // template, post-stop suffix, etc.). Relocate by creation-date
+        // proximity to the current recording's `startedAt` so the rest of
+        // the pipeline sees a real path. No-op when the file is still
+        // where we expect it.
+        let url = await resolvedAudioURL(for: url)
 
         // 0a. If this file's creation date falls inside an active Jot-driven
         // recording window, pull the snapshot we'll use for both renaming
@@ -444,12 +464,22 @@ actor ProcessingPipeline {
 
         onStateChange(.processing(firstPart))
 
+        // 0-pre. Same AH-rename guard as the single-file path: if any
+        // part has been renamed by Audio Hijack between watcher emit
+        // and now, relocate by creation-date proximity to the
+        // recording's startedAt. No-op when nothing moved.
+        var resolvedParts: [URL] = []
+        resolvedParts.reserveCapacity(batch.parts.count)
+        for part in batch.parts {
+            resolvedParts.append(await resolvedAudioURL(for: part, anchor: batch.startedAt))
+        }
+
         // 1. Rename each part with the meeting name and a "(part N)"
         // suffix for N > 1. Part 1 keeps the bare meeting-named filename
         // so the meeting folder + transcript pick it up via
         // `FileOrganizer`'s `baseName` lookup. Best-effort: a failed
         // rename falls back to the original URL.
-        let renamedParts = await renameParts(batch.parts, snapshot: snapshot)
+        let renamedParts = await renameParts(resolvedParts, snapshot: snapshot)
 
         let prompt = snapshot.resolvedCompiledContext.isEmpty
             ? nil
@@ -662,6 +692,98 @@ actor ProcessingPipeline {
     private func fileCreationDate(of url: URL) -> Date? {
         let values = try? url.resourceValues(forKeys: [.creationDateKey])
         return values?.creationDate
+    }
+
+    // MARK: - Stale-URL relocation (Audio Hijack rename race)
+
+    /// Audio Hijack's Recorder block can rename a file post-stop based
+    /// on its Filename template (end-time suffix, "(complete)", etc.)
+    /// AFTER our watcher has already emitted the stable URL and AFTER
+    /// the accumulator has buffered it. By the time `process(url:)` /
+    /// `processBatch` reach validation, the original path is gone but
+    /// the *file* is still there under a new name in the same dir.
+    ///
+    /// This helper plugs that hole: if `url` is missing on disk, scan
+    /// `url.deletingLastPathComponent()` for audio files (mp3/m4a/wav)
+    /// whose creation date is within `slop` of `expectedCreationDate`
+    /// (the recording's `startedAt`, or for a batch the captured per-
+    /// part creation date). Exactly-one match → return that URL.
+    /// Zero or multiple matches → return nil and let the caller surface
+    /// the original "file not found" error.
+    ///
+    /// `nonisolated` so the unit test can drive it without standing up
+    /// the whole pipeline actor.
+    nonisolated static func relocateMissingFile(
+        url: URL,
+        expectedCreationDate: Date,
+        slop: TimeInterval = 30,
+        fileManager: FileManager = .default
+    ) -> URL? {
+        // Fast path: nothing to do if the URL is still valid.
+        if fileManager.fileExists(atPath: url.path(percentEncoded: false)) {
+            return url
+        }
+        let parent = url.deletingLastPathComponent()
+        let allowedExtensions: Set<String> = ["mp3", "m4a", "wav"]
+
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: parent,
+            includingPropertiesForKeys: [.creationDateKey]
+        ) else { return nil }
+
+        let candidates: [URL] = entries.compactMap { entry in
+            guard allowedExtensions.contains(entry.pathExtension.lowercased()) else { return nil }
+            let values = try? entry.resourceValues(forKeys: [.creationDateKey])
+            guard let created = values?.creationDate else { return nil }
+            return abs(created.timeIntervalSince(expectedCreationDate)) <= slop ? entry : nil
+        }
+        guard candidates.count == 1 else { return nil }
+        return candidates[0]
+    }
+
+    /// Wrap a candidate URL: if the file exists, return it as-is. If not,
+    /// try to relocate via the pending recording's `startedAt`. Logs the
+    /// relocation when it happens so Console.app shows the AH-rename
+    /// race in real time.
+    private func resolvedAudioURL(
+        for url: URL,
+        anchor: Date? = nil
+    ) async -> URL {
+        if FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) {
+            return url
+        }
+        let expectedDate: Date?
+        if let anchor {
+            expectedDate = anchor
+        } else if let peek = pendingRecordingStartedAt {
+            expectedDate = await peek()
+        } else {
+            expectedDate = nil
+        }
+        guard let expectedDate else {
+            Log.pipeline.warning(
+                "File missing at \(url.path(percentEncoded: false), privacy: .public) and no recording anchor to relocate against."
+            )
+            return url
+        }
+        guard let relocated = Self.relocateMissingFile(
+            url: url,
+            expectedCreationDate: expectedDate
+        ) else {
+            Log.pipeline.warning(
+                "File missing at \(url.path(percentEncoded: false), privacy: .public); no unique relocation match against startedAt=\(expectedDate, privacy: .public)."
+            )
+            return url
+        }
+        Log.pipeline.info(
+            "Relocated missing file: \(url.lastPathComponent, privacy: .public) → \(relocated.lastPathComponent, privacy: .public) (Audio Hijack post-stop rename)"
+        )
+        onAuditEntry(.init(
+            kind: .info,
+            sourcePath: relocated.path(percentEncoded: false),
+            message: "Relocated \(url.lastPathComponent) → \(relocated.lastPathComponent) (file moved after watcher emit)"
+        ))
+        return relocated
     }
 
     /// `yyyy.MM.dd - HH.mm` in local time — the prefix that gives meeting

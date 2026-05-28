@@ -172,11 +172,17 @@ final class PipelineCoordinator {
         do {
             let watcher = try await FolderWatcher(folderURL: config.watchFolder)
             let consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)?
+            let pendingRecordingStartedAt: (@Sendable () async -> Date?)?
             let clearPendingMeetingContext: (@Sendable () async -> Void)?
             if let store = meetingContextStore {
                 consumeMeetingContext = { creationDate in
                     await MainActor.run {
                         store.consume(forFileCreatedAt: creationDate)
+                    }
+                }
+                pendingRecordingStartedAt = {
+                    await MainActor.run {
+                        store.pendingStartedAt()
                     }
                 }
                 clearPendingMeetingContext = {
@@ -186,6 +192,7 @@ final class PipelineCoordinator {
                 }
             } else {
                 consumeMeetingContext = nil
+                pendingRecordingStartedAt = nil
                 clearPendingMeetingContext = nil
             }
             let notionMode = makeNotionMode()
@@ -205,6 +212,7 @@ final class PipelineCoordinator {
                     }
                 },
                 consumeMeetingContext: consumeMeetingContext,
+                pendingRecordingStartedAt: pendingRecordingStartedAt,
                 batchAccumulator: batchAccumulator,
                 clearPendingMeetingContext: clearPendingMeetingContext,
                 notionMode: notionMode,

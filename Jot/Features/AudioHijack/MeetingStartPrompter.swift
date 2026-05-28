@@ -46,6 +46,16 @@ final class SystemMeetingStartPrompter: NSObject, MeetingStartPrompting, NSTextF
         organizations: [Organization],
         defaultOrgId: UUID?
     ) async -> MeetingStartInputs? {
+        // Hide any visible regular windows (typically the main app window
+        // left open from earlier Settings / Context tab use) BEFORE we
+        // activate the app. `NSApp.activate(ignoringOtherApps:)` re-fronts
+        // whichever window the app last had visible — without this guard
+        // the main window pops up alongside the prompt, which is
+        // distracting at "start meeting" time (user feedback, v0.2.0).
+        for window in NSApp.windows
+            where window.isVisible && window.level == .normal {
+            window.orderOut(nil)
+        }
         NSApp.activate(ignoringOtherApps: true)
 
         let alert = NSAlert()

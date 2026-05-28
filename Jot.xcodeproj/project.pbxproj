@@ -99,6 +99,7 @@
 		D06A67B449C23AD74BE1D7ED /* Organization.swift in Sources */ = {isa = PBXBuildFile; fileRef = B99FEEA8519663736DEA1B19 /* Organization.swift */; };
 		D14EDC251BC9460575817D06 /* SettingsLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DE3A8927A79D1A30FBA1E14 /* SettingsLayout.swift */; };
 		D23ABB1ABF450D1AF7F2581A /* LoginItemManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 977457B64140FDA43F9D78FA /* LoginItemManager.swift */; };
+		D2B871A07D7630451903D1FF /* MeetingFolderTimestampTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89019A012263DB9A106180B6 /* MeetingFolderTimestampTests.swift */; };
 		D5634C93E31A5A224B5A3D71 /* SparkleUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FFF6D759A190A5810932745 /* SparkleUpdater.swift */; };
 		D5B027C42726B753B8835658 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70335DFB54D4A0FA6A73BD50 /* Keychain.swift */; };
 		D6FFC310E65A663C775A32F4 /* MainWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78A86F1ADBC2862697A84BDA /* MainWindow.swift */; };
@@ -209,6 +210,7 @@
 		835DFD92489590195327E5D0 /* FileReadinessDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileReadinessDetectorTests.swift; sourceTree = "<group>"; };
 		8549355AFCCD5943FD32D966 /* MeetingTranscriber_PRD_v2026_05_27.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = MeetingTranscriber_PRD_v2026_05_27.md; sourceTree = "<group>"; };
 		85D7D085ECF0C2D44D33B1D0 /* DebugModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugModeTests.swift; sourceTree = "<group>"; };
+		89019A012263DB9A106180B6 /* MeetingFolderTimestampTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingFolderTimestampTests.swift; sourceTree = "<group>"; };
 		8DB56050E77D0011B0CB1E6C /* AudioHijackController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioHijackController.swift; sourceTree = "<group>"; };
 		8E837917D8AFED1FE97C157E /* SettingsValidation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsValidation.swift; sourceTree = "<group>"; };
 		8F11100474748353695B5D13 /* RecordingURLOpener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingURLOpener.swift; sourceTree = "<group>"; };
@@ -533,6 +535,7 @@
 				6F81143C80A9FC0C13DFB362 /* FileOrganizerContextTests.swift */,
 				61D6611F43F01B87EA684EC2 /* FileOrganizerIntegrationTests.swift */,
 				DA7DE2FAD0613AA70E1E03BF /* FileOrganizerTests.swift */,
+				89019A012263DB9A106180B6 /* MeetingFolderTimestampTests.swift */,
 				95F9E11967B48E4D9666D28C /* PipelineCoordinatorTests.swift */,
 				1C6FD0A84281D5E1073A427A /* PipelineIntegrationTests.swift */,
 			);
@@ -1026,6 +1029,7 @@
 				6AE3B1901D7841728CE9992D /* MeetingContextSanitizerTests.swift in Sources */,
 				631BEF4286B57E974FF18AAF /* MeetingContextSnapshotTests.swift in Sources */,
 				BE99F54CE3616AD71FC9C1C5 /* MeetingContextStoreTests.swift in Sources */,
+				D2B871A07D7630451903D1FF /* MeetingFolderTimestampTests.swift in Sources */,
 				B28F4C969AAA32DAD36565E7 /* MeetingStartInputsTests.swift in Sources */,
 				C975ADE0D1AA4A5D017EBBEC /* MenuBarControllerTests.swift in Sources */,
 				2339352A1ADF1CC4D0BD710F /* MockURLProtocol.swift in Sources */,

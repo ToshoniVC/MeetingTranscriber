@@ -21,6 +21,8 @@ struct SettingsView: View {
                 Divider()
                 HotkeySection()
                 Divider()
+                NotionSection()
+                Divider()
                 SystemSection()
             }
             .padding(24)

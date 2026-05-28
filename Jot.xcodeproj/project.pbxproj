@@ -76,6 +76,7 @@
 		8E99D21BC66277CF7867F9AA /* NotionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17687F46D7A0781669E5CC9F /* NotionClient.swift */; };
 		91586B6F48449555EC1AC9CE /* OrganizationValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E615560456029811A82F1D82 /* OrganizationValidationTests.swift */; };
 		9240339CF2A247BF628F3C1A /* AuditLogRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BBEFBD0799076D336165C83 /* AuditLogRow.swift */; };
+		93741B360180366CEB19505E /* NotionSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CAE0A6CBA71628292FA30E4 /* NotionSection.swift */; };
 		992DD377B75E4CBD0BB988E5 /* AudioHijackBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B9339643FC3CFAAF11D16F /* AudioHijackBlock.swift */; };
 		9B480CA41E55B9EB38EF1E75 /* FakeLoginItemControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6731DA96C0D07E749082ACE9 /* FakeLoginItemControlling.swift */; };
 		9C6E60AD410DA322579E1387 /* HotkeySection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3716163D53B77C131C18B69C /* HotkeySection.swift */; };
@@ -156,6 +157,7 @@
 		0D24EB93716734CA8BF8BF12 /* AuditLogStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuditLogStoreTests.swift; sourceTree = "<group>"; };
 		0DAD2D250F707F55132C9E60 /* NotionValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotionValidationTests.swift; sourceTree = "<group>"; };
 		0F8CB90038AF44E31E5DEBDC /* AuditLogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuditLogView.swift; sourceTree = "<group>"; };
+		0FEDA063F8CE44B05524C135 /* implementation-plan_claudeCodeMeetingNotes_v2026_05_28.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "implementation-plan_claudeCodeMeetingNotes_v2026_05_28.md"; sourceTree = "<group>"; };
 		108C06A1DC6694146E00D0C8 /* TranscriptionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionClient.swift; sourceTree = "<group>"; };
 		1496A58E4D80E63C3314D709 /* AuditLogEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuditLogEntry.swift; sourceTree = "<group>"; };
 		16F5FB2169CF5FC8AF6C35D4 /* AppSettingsNotionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsNotionTests.swift; sourceTree = "<group>"; };
@@ -188,7 +190,6 @@
 		4775FFA7D67C78B575F79898 /* project.yml */ = {isa = PBXFileReference; lastKnownFileType = text.yaml; path = project.yml; sourceTree = "<group>"; };
 		4CB55A7C13113AE3CBA0BEB7 /* coding-instructions.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "coding-instructions.md"; sourceTree = "<group>"; };
 		515AD813A8FC1D4B8B254A95 /* OrganizationStoreIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrganizationStoreIntegrationTests.swift; sourceTree = "<group>"; };
-		5195BF3C1B0275AA6723CC1B /* implementation-plan_notion_v2026_05_28.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "implementation-plan_notion_v2026_05_28.md"; sourceTree = "<group>"; };
 		54ACE6CD87EB510571F413C2 /* SettingsFeatureSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsFeatureSmokeTests.swift; sourceTree = "<group>"; };
 		55150BB151646F699DEA1E9C /* MenuBarController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarController.swift; sourceTree = "<group>"; };
 		57CBEEB128198DC8D2EC31AB /* AppVersionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppVersionTests.swift; sourceTree = "<group>"; };
@@ -211,6 +212,7 @@
 		69ACEF2BDA7EA08CD8719374 /* JotTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = JotTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6A6DE1E88DB26D4CEF759D93 /* SystemSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSection.swift; sourceTree = "<group>"; };
 		6C52DECAD9EEB09355E1BC87 /* NotionErrorMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotionErrorMappingTests.swift; sourceTree = "<group>"; };
+		6CAE0A6CBA71628292FA30E4 /* NotionSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotionSection.swift; sourceTree = "<group>"; };
 		6CED4791D1BA89CAF006D804 /* AppSettingsIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsIntegrationTests.swift; sourceTree = "<group>"; };
 		6DE3A8927A79D1A30FBA1E14 /* SettingsLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsLayout.swift; sourceTree = "<group>"; };
 		6E76D647F9761C3C06836450 /* MenuBarControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarControllerTests.swift; sourceTree = "<group>"; };
@@ -609,6 +611,7 @@
 				D91746CCF9ADAEE0ED96867C /* APIConfigSection.swift */,
 				07437514C635B493E10FE7F4 /* FoldersSection.swift */,
 				3716163D53B77C131C18B69C /* HotkeySection.swift */,
+				6CAE0A6CBA71628292FA30E4 /* NotionSection.swift */,
 				6DE3A8927A79D1A30FBA1E14 /* SettingsLayout.swift */,
 				DF5852AA7796E4BAEF5AB484 /* SettingsView.swift */,
 				6A6DE1E88DB26D4CEF759D93 /* SystemSection.swift */,
@@ -767,7 +770,7 @@
 				B85AC8A673A9BBEDC70F2EF2 /* archive */,
 				4CB55A7C13113AE3CBA0BEB7 /* coding-instructions.md */,
 				B7432951F87B16ADC1E3A8D3 /* development-lifecycle.md */,
-				5195BF3C1B0275AA6723CC1B /* implementation-plan_notion_v2026_05_28.md */,
+				0FEDA063F8CE44B05524C135 /* implementation-plan_claudeCodeMeetingNotes_v2026_05_28.md */,
 				2479C787A5E076F8674DEC7B /* implementation-plan.md */,
 			);
 			path = Claude;
@@ -1034,6 +1037,7 @@
 				8190AE2076419F7E96571BD7 /* NotionMeetingWriter.swift in Sources */,
 				D827E9838278D6B7D573FE2B /* NotionPageBuilder.swift in Sources */,
 				E8FF0493F280995EED5CEAEB /* NotionPagePayload.swift in Sources */,
+				93741B360180366CEB19505E /* NotionSection.swift in Sources */,
 				4BA939BD929D755DDE19ECAB /* NotionValidation.swift in Sources */,
 				D06A67B449C23AD74BE1D7ED /* Organization.swift in Sources */,
 				25E05ED13CBE47E3A5B80AF9 /* OrganizationDetailView.swift in Sources */,

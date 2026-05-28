@@ -12,6 +12,7 @@ struct JotApp: App {
     @State private var menuBar: MenuBarController
     @State private var settings: AppSettings
     @State private var auditLog: AuditLogStore
+    @State private var organizations: OrganizationStore
     @State private var pipeline: PipelineCoordinator
     @State private var hotkey: HotkeyCoordinator
     @State private var loginItem: LoginItemController
@@ -25,6 +26,7 @@ struct JotApp: App {
         let menuBar = MenuBarController()
         let settings = AppSettings()
         let auditLog = AuditLogStore()
+        let organizations = OrganizationStore()
         // Shared between HotkeyCoordinator (stamps started/stopped events)
         // and PipelineCoordinator (queries it when a new file lands to
         // decide whether to rename to the user-typed meeting name).
@@ -58,6 +60,7 @@ struct JotApp: App {
         self._menuBar = State(initialValue: menuBar)
         self._settings = State(initialValue: settings)
         self._auditLog = State(initialValue: auditLog)
+        self._organizations = State(initialValue: organizations)
         self._pipeline = State(initialValue: pipeline)
         self._hotkey = State(initialValue: hotkey)
         self._loginItem = State(initialValue: loginItem)
@@ -103,6 +106,7 @@ struct JotApp: App {
                 .environment(menuBar)
                 .environment(settings)
                 .environment(auditLog)
+                .environment(organizations)
                 .environment(pipeline)
                 .environment(hotkey)
                 .environment(loginItem)

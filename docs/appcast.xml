@@ -3,12 +3,12 @@
     <channel>
         <title>Jot</title>
         <item>
-            <title>0.4.6</title>
-            <pubDate>Thu, 28 May 2026 19:04:50 +0000</pubDate>
-            <sparkle:version>94</sparkle:version>
-            <sparkle:shortVersionString>0.4.6</sparkle:shortVersionString>
+            <title>0.4.7</title>
+            <pubDate>Thu, 28 May 2026 19:38:17 +0000</pubDate>
+            <sparkle:version>96</sparkle:version>
+            <sparkle:shortVersionString>0.4.7</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ToshoniVC/MeetingTranscriber/releases/download/v0.4.6/Jot-0.4.6.zip" length="2562385" type="application/octet-stream" sparkle:edSignature="cVbZSZSrfzE876WeXx4LsjjhH6WDO5t0BWvffZfmm0V59w2J/JZqO8DwS4gHUMerSPOmZ6X+Cd0dLPDZ4UeoAw=="/>
+            <enclosure url="https://github.com/ToshoniVC/MeetingTranscriber/releases/download/v0.4.7/Jot-0.4.7.zip" length="2574747" type="application/octet-stream" sparkle:edSignature="KS9FkqUo0owjBOLVyiatNPURV9nC30Xmo1d/OprXSUylRMYFM8GDpdMmq5XH+imN50LEHh737gIDDCdrdzUnCw=="/>
         </item>
     </channel>
 </rss>

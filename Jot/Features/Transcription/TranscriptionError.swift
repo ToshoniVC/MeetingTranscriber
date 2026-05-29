@@ -50,8 +50,17 @@ enum TranscriptionError: Error, Equatable {
             return "API key was rejected. Check it in Settings."
         case .fileTooLarge(let hint):
             return hint.map { "Audio file too large (\($0))." } ?? "Audio file too large for the endpoint."
-        case .serverError(let status, _):
-            return "Server returned HTTP \(status)."
+        case .serverError(let status, let body):
+            // v0.5.2: surface the first chunk of the server's response
+            // body. Without this, the audit-log row reads "Server
+            // returned HTTP 400" and we lose the actionable JSON
+            // (`{"error":{"message":"..."}}`) OpenAI / Groq return.
+            // Newlines collapsed to spaces so the row stays single-
+            // line; capped at 300 chars to keep audit rows readable.
+            let snippet = Self.normalizedBodySnippet(body)
+            return snippet.isEmpty
+                ? "Server returned HTTP \(status)."
+                : "Server returned HTTP \(status): \(snippet)"
         case .transientNetwork(let message):
             return "Network error: \(message). Will retry once."
         case .timeout:
@@ -61,6 +70,25 @@ enum TranscriptionError: Error, Equatable {
         case .internalInconsistency(let detail):
             return "Internal error: \(detail)."
         }
+    }
+
+    /// Flatten newlines + tabs to single spaces, trim, cap to 300
+    /// characters. Keeps the audit-log row readable when the body is
+    /// multi-line JSON or HTML. Public-ish so the tests can pin the
+    /// exact formatting rule.
+    static func normalizedBodySnippet(_ body: String, maxLength: Int = 300) -> String {
+        let collapsed = body
+            .replacingOccurrences(of: "\r\n", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Squeeze runs of spaces — bodies that came in as pretty-
+        // printed JSON would otherwise be visually mangled.
+        let squeezed = collapsed.split(separator: " ", omittingEmptySubsequences: true)
+            .joined(separator: " ")
+        if squeezed.count <= maxLength { return squeezed }
+        return String(squeezed.prefix(maxLength)) + "…"
     }
 }
 

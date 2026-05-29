@@ -583,3 +583,95 @@ struct ManualUploadNormalizationRoutingTests {
     }
 }
 
+// MARK: - v0.5.5 Audio Hijack part-number ordering
+
+/// Pure tests for the AH part-number extractor + the picker's sort
+/// rule. Audio Hijack writes the first split of a recording without a
+/// suffix and parts 2..N with `(part N)` — the picker has to put the
+/// bare filename first or the meeting reads out of order in the
+/// merged JSON / Notion page.
+struct ManualUploadAudioHijackOrderingTests {
+
+    @Test
+    func partNumber_bareFilename_returns1() {
+        #expect(SystemManualUploadFilePicker.audioHijackPartNumber(forFilename: "meeting.mp3") == 1)
+    }
+
+    @Test
+    func partNumber_part2_returns2() {
+        #expect(SystemManualUploadFilePicker.audioHijackPartNumber(forFilename: "meeting (part 2).mp3") == 2)
+    }
+
+    @Test
+    func partNumber_part10_returns10() {
+        #expect(SystemManualUploadFilePicker.audioHijackPartNumber(forFilename: "meeting (part 10).mp3") == 10)
+    }
+
+    @Test
+    func partNumber_worksForM4A() {
+        // Post-v0.5.4 the user might upload already-normalised m4a
+        // files that still carry the AH naming.
+        #expect(SystemManualUploadFilePicker.audioHijackPartNumber(forFilename: "meeting (part 3).m4a") == 3)
+    }
+
+    @Test
+    func partNumber_namePart2InsteadOfSuffix_doesNotMatch() {
+        // A meeting literally called "Part 2 of Series" shouldn't be
+        // mis-classified as AH's split convention. The suffix has to
+        // be lowercase `(part N)` at the end of the stem.
+        #expect(SystemManualUploadFilePicker.audioHijackPartNumber(forFilename: "Part 2 of Series.mp3") == 1)
+    }
+
+    @Test
+    func partNumber_mixedCaseSuffix_doesNotMatch() {
+        // AH uses lowercase `part`. Anything else is user-named and
+        // shouldn't be parsed.
+        #expect(SystemManualUploadFilePicker.audioHijackPartNumber(forFilename: "meeting (Part 2).mp3") == 1)
+    }
+
+    // MARK: - Sort behaviour (end-to-end via the helper)
+
+    /// Reproduce the v0.5.4 bug shape: a folder of 10 AH parts whose
+    /// bare-named first file sorts last alphabetically. After the
+    /// v0.5.5 sort it should be first.
+    @Test
+    func sortByPartNumber_putsBareFilenameFirst() {
+        let names = [
+            "meeting (part 2).mp3",
+            "meeting (part 10).mp3",
+            "meeting.mp3",
+            "meeting (part 3).mp3",
+            "meeting (part 4).mp3",
+            "meeting (part 9).mp3"
+        ]
+        let sorted = names.sorted { a, b in
+            let aN = SystemManualUploadFilePicker.audioHijackPartNumber(forFilename: a)
+            let bN = SystemManualUploadFilePicker.audioHijackPartNumber(forFilename: b)
+            if aN != bN { return aN < bN }
+            return a.localizedStandardCompare(b) == .orderedAscending
+        }
+        #expect(sorted == [
+            "meeting.mp3",
+            "meeting (part 2).mp3",
+            "meeting (part 3).mp3",
+            "meeting (part 4).mp3",
+            "meeting (part 9).mp3",
+            "meeting (part 10).mp3"
+        ])
+    }
+
+    @Test
+    func sortByPartNumber_nonAHFilenames_fallBackToLocalizedSort() {
+        // Two clips that don't follow AH's naming should still sort
+        // sensibly via the secondary `localizedStandardCompare` rule.
+        let names = ["clip-10.mp3", "clip-2.mp3", "clip-1.mp3"]
+        let sorted = names.sorted { a, b in
+            let aN = SystemManualUploadFilePicker.audioHijackPartNumber(forFilename: a)
+            let bN = SystemManualUploadFilePicker.audioHijackPartNumber(forFilename: b)
+            if aN != bN { return aN < bN }
+            return a.localizedStandardCompare(b) == .orderedAscending
+        }
+        #expect(sorted == ["clip-1.mp3", "clip-2.mp3", "clip-10.mp3"])
+    }
+}
+

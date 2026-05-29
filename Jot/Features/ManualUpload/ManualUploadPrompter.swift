@@ -15,15 +15,16 @@ protocol MeetingUploadPrompting: AnyObject {
     /// choices, or nil if they cancelled.
     ///
     /// - Parameters:
-    ///   - sourceFilename: last path component of the picked file (e.g.
-    ///     `Standup 2026-05-28.mp4`). Shown in the dialog informative
-    ///     text so the user can confirm which file they're about to
-    ///     queue.
+    ///   - sourceDescription: human-readable summary of what's being
+    ///     uploaded — for v0.5.0 single-file it's just the filename;
+    ///     for v0.5.1 multi-file it's "<first>.mp3 + N more (one
+    ///     meeting)". Shown in the dialog so the user can confirm
+    ///     what they're queueing.
     ///   - organizations: full org list to populate the picker.
     ///   - defaultOrgId: pre-selected org id, or `nil` to default to
     ///     the "No Organization" sentinel.
     func askForUpload(
-        sourceFilename: String,
+        sourceDescription: String,
         organizations: [Organization],
         defaultOrgId: UUID?
     ) async -> MeetingStartInputs?
@@ -48,7 +49,7 @@ final class SystemMeetingUploadPrompter: NSObject, MeetingUploadPrompting, NSTex
     private weak var nameField: NSTextField?
 
     func askForUpload(
-        sourceFilename: String,
+        sourceDescription: String,
         organizations: [Organization],
         defaultOrgId: UUID?
     ) async -> MeetingStartInputs? {
@@ -56,7 +57,7 @@ final class SystemMeetingUploadPrompter: NSObject, MeetingUploadPrompting, NSTex
 
         let alert = NSAlert()
         alert.messageText = "Upload — add meeting details"
-        alert.informativeText = "Pick a meeting name and organization for \(sourceFilename). Optional notes are sent to the transcription endpoint as context."
+        alert.informativeText = "Pick a meeting name and organization for \(sourceDescription). Optional notes are sent to the transcription endpoint as context."
         let saveButton = alert.addButton(withTitle: "Upload")
         alert.addButton(withTitle: "Cancel")
         self.saveButton = saveButton

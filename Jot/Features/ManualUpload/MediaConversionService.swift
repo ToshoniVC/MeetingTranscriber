@@ -1,29 +1,40 @@
 import Foundation
 @preconcurrency import AVFoundation
 
-/// Extracts the audio track from a `.mp4` and writes it to a `.m4a` file
-/// at a caller-supplied destination. Uses `AVAssetExportSession` with the
+/// Re-encodes any audio-bearing input to `.m4a` (AAC) at a caller-
+/// supplied destination. Uses `AVAssetExportSession` with the
 /// `AppleM4A` preset — native, no external binary dependency. The
 /// `FolderWatcher` already accepts `.m4a` (see `SupportedAudioType`), so
 /// the resulting file flows through the existing pipeline unchanged.
 ///
-/// The PRD spec calls this conversion "to `.mp3`", but AVFoundation has
-/// no native MP3 encoder. Transcription endpoints (Whisper, Groq) don't
-/// care about the container suffix — they accept M4A/AAC at the same
-/// quality. Bundling an MP3 encoder (LAME) or shelling out to ffmpeg
-/// would add hundreds of KB of binary or a user-installation
-/// prerequisite for zero behavioural difference, so we use the native
-/// path.
+/// **Two callers, same underlying operation:**
+/// 1. **MP4 → m4a** (v0.5.0): extract the audio track from a video and
+///    drop the result into the Watch Folder.
+/// 2. **MP3 → m4a** (v0.5.4): normalise an uploaded MP3 to dodge the
+///    Audio-Hijack-split-MP3 / Whisper-can't-decode case. Audio Hijack
+///    writes split parts whose ID3/Xing metadata trips OpenAI's
+///    server-side decoder ("audio file could not be decoded"), even
+///    when local players + macOS's `afinfo` handle them fine.
+///    Re-encoding via AVAssetExportSession produces a clean AAC-in-m4a
+///    file that every endpoint accepts.
+///
+/// AVFoundation has no native MP3 encoder, so we don't bother trying to
+/// stay in the MP3 container — m4a/AAC is what AVFoundation does well
+/// and what every transcription endpoint accepts at the same quality.
+/// Bundling LAME or shelling out to ffmpeg would add hundreds of KB of
+/// binary or a user-installation prerequisite for zero behavioural
+/// difference.
 struct MediaConversionService: Sendable {
 
-    /// Extract the audio track from `inputURL` (.mp4) into a freshly-
-    /// written `.m4a` at `outputURL`. Any pre-existing file at
+    /// Re-encode the audio in `inputURL` (mp3, m4a, wav, or mp4) into a
+    /// freshly-written `.m4a` at `outputURL`. Any pre-existing file at
     /// `outputURL` is removed first so the export has a clean target;
     /// any partial output left behind by a failed export is also
     /// cleaned up before the typed error is rethrown.
     ///
     /// Throws:
-    /// - `.noAudioTrack` if the asset has no audio track at all.
+    /// - `.noAudioTrack` if the asset has no audio track at all (an MP4
+    ///   recorded with the mic muted, for example).
     /// - `.conversionFailed(reason)` for any AVFoundation error or
     ///   pre-flight failure.
     /// - `CancellationError` if the task was cancelled mid-export

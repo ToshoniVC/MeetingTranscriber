@@ -260,6 +260,58 @@ final class ManualUploadCoordinator {
         }
     }
 
+    // MARK: - Pre-staging conversion (v0.5.4 normalises MP3s)
+
+    /// Decide whether `source` needs conversion to m4a before staging.
+    ///
+    /// - `mp4` always needs extraction (the file is a video container).
+    /// - `mp3` needs re-encoding because Audio Hijack split parts can
+    ///   have ID3/Xing metadata that Whisper's server-side decoder
+    ///   rejects even when local decoders handle them (the v0.5.2
+    ///   `"The audio file could not be decoded or its format is not
+    ///   supported"` 400 surface). Re-encoding to AAC in an m4a
+    ///   container via `MediaConversionService` produces a clean file
+    ///   every endpoint accepts.
+    /// - `m4a` and `wav` pass through — they're already cleanly
+    ///   decodable, and re-encoding would just waste time + fidelity.
+    ///
+    /// `nonisolated` + static so the routing decision is unit-testable
+    /// without standing up the coordinator.
+    nonisolated static func needsNormalization(
+        kind: ManualUploadMediaKind,
+        extension ext: String
+    ) -> Bool {
+        switch (kind, ext.lowercased()) {
+        case (.videoMP4, _): return true
+        case (.audio, "mp3"): return true
+        case (.audio, _): return false
+        }
+    }
+
+    /// If `source` needs normalisation per `needsNormalization`, run
+    /// the conversion and return the temp m4a URL (+ the same URL as
+    /// the temp artefact the caller must clean up). Otherwise return
+    /// the source unchanged and a nil temp artefact.
+    private func prepareStagingSource(
+        for source: URL,
+        kind: ManualUploadMediaKind
+    ) async throws -> (stagingSource: URL, tempArtifact: URL?) {
+        guard Self.needsNormalization(kind: kind, extension: source.pathExtension) else {
+            return (source, nil)
+        }
+        status = .converting(filename: source.lastPathComponent)
+        let tempURL = tempOutputURL(for: source, ext: "m4a")
+        try await conversion.extractAudio(from: source, to: tempURL)
+        let action = (kind == .videoMP4) ? "extracted audio" : "normalized MP3"
+        auditLog.append(.init(
+            kind: .info,
+            sourcePath: source.path(percentEncoded: false),
+            message: "Manual upload: \(action) from \(source.lastPathComponent)"
+        ))
+        Log.manualUpload.info("\(action, privacy: .public): \(source.lastPathComponent, privacy: .public)")
+        return (tempURL, tempURL)
+    }
+
     // MARK: - Single-file path (v0.5.0)
 
     private func runSingle(
@@ -282,29 +334,18 @@ final class ManualUploadCoordinator {
             at: startedAt
         )
 
-        // Convert MP4 → m4a if needed.
-        var tempArtifact: URL?
+        // Conversion step: mp4 → extract audio, mp3 → normalise (v0.5.4
+        // to dodge Whisper-server "could not decode" 400s on Audio
+        // Hijack split MP3s), m4a/wav → passthrough.
         let stagingSource: URL
-        switch kind {
-        case .audio:
-            stagingSource = source
-        case .videoMP4:
-            status = .converting(filename: source.lastPathComponent)
-            let tempURL = tempOutputURL(for: source, ext: "m4a")
-            do {
-                try await conversion.extractAudio(from: source, to: tempURL)
-            } catch {
-                meetingContextStore.reset()
-                throw error
-            }
-            tempArtifact = tempURL
-            stagingSource = tempURL
-            auditLog.append(.init(
-                kind: .info,
-                sourcePath: source.path(percentEncoded: false),
-                message: "Manual upload: extracted audio from \(source.lastPathComponent)"
-            ))
-            Log.manualUpload.info("Extracted audio for \(source.lastPathComponent, privacy: .public)")
+        var tempArtifact: URL?
+        do {
+            (stagingSource, tempArtifact) = try await prepareStagingSource(
+                for: source, kind: kind
+            )
+        } catch {
+            meetingContextStore.reset()
+            throw error
         }
 
         // Stage (clears ledger entry first to defeat the v0.5.0 "re-
@@ -363,22 +404,10 @@ final class ManualUploadCoordinator {
 
         do {
             for entry in sources {
-                let stagingSource: URL
-                switch entry.kind {
-                case .audio:
-                    stagingSource = entry.url
-                case .videoMP4:
-                    status = .converting(filename: entry.url.lastPathComponent)
-                    let tempURL = tempOutputURL(for: entry.url, ext: "m4a")
-                    try await conversion.extractAudio(from: entry.url, to: tempURL)
-                    tempArtifacts.append(tempURL)
-                    stagingSource = tempURL
-                    auditLog.append(.init(
-                        kind: .info,
-                        sourcePath: entry.url.path(percentEncoded: false),
-                        message: "Manual upload: extracted audio from \(entry.url.lastPathComponent)"
-                    ))
-                }
+                let (stagingSource, tempArtifact) = try await prepareStagingSource(
+                    for: entry.url, kind: entry.kind
+                )
+                if let tempArtifact { tempArtifacts.append(tempArtifact) }
 
                 status = .staging(filename: entry.url.lastPathComponent)
                 let staged = try await stageOne(source: stagingSource, into: watchFolder)

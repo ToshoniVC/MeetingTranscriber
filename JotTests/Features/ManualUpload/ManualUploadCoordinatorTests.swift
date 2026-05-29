@@ -72,14 +72,18 @@ struct ManualUploadCoordinatorTests {
         )
     }
 
-    // MARK: - Happy path (mp3)
+    // MARK: - Happy path (audio passthrough)
 
     @Test
-    func beginUpload_mp3_stagesIntoWatchFolderAndStampsContext() async throws {
+    func beginUpload_audioPassthrough_stagesIntoWatchFolderAndStampsContext() async throws {
         let pickedDir = try Self.makeTempDir()
         let watchDir = try Self.makeTempDir()
         defer { Self.cleanUp(pickedDir, watchDir) }
-        let source = try Self.putFile(named: "Client Call.mp3", in: pickedDir, bytes: 256)
+        // .m4a takes the passthrough branch in `prepareStagingSource`;
+        // the v0.5.4 MP3-normalisation branch is covered by
+        // `ManualUploadNormalizationRoutingTests` (pure decision
+        // function) so we don't need real audio bytes here.
+        let source = try Self.putFile(named: "Client Call.m4a", in: pickedDir, bytes: 256)
 
         let f = Self.makeFixture(watchFolder: watchDir)
         f.picker.nextResponse = source
@@ -92,7 +96,7 @@ struct ManualUploadCoordinatorTests {
         await f.coordinator.beginUpload()
 
         #expect(f.coordinator.status == .idle)
-        let staged = watchDir.appendingPathComponent("Client Call.mp3")
+        let staged = watchDir.appendingPathComponent("Client Call.m4a")
         #expect(FileManager.default.fileExists(atPath: staged.path(percentEncoded: false)),
                 "Staging should copy the file into the watch folder.")
         // Source must remain at its original location (copy, not move).
@@ -332,9 +336,12 @@ struct ManualUploadCoordinatorMultiFileTests {
             try? FileManager.default.removeItem(at: ledgerFile)
         }
 
-        let p1 = try Self.putFile(named: "UKG (part 1).mp3", in: sourceDir)
-        let p2 = try Self.putFile(named: "UKG (part 2).mp3", in: sourceDir)
-        let p3 = try Self.putFile(named: "UKG (part 3).mp3", in: sourceDir)
+        // Use .m4a so the v0.5.4 MP3-normalisation step is skipped —
+        // we're asserting the batch staging mechanics here, not the
+        // format conversion (covered by `ManualUploadNormalizationRoutingTests`).
+        let p1 = try Self.putFile(named: "UKG (part 1).m4a", in: sourceDir)
+        let p2 = try Self.putFile(named: "UKG (part 2).m4a", in: sourceDir)
+        let p3 = try Self.putFile(named: "UKG (part 3).m4a", in: sourceDir)
 
         let (f, _) = await Self.makeFixture(watchFolder: watchDir, ledgerFile: ledgerFile)
         f.picker.nextResponses = [p1, p2, p3]
@@ -350,7 +357,7 @@ struct ManualUploadCoordinatorMultiFileTests {
         let stagedNames = try FileManager.default
             .contentsOfDirectory(atPath: watchDir.path(percentEncoded: false))
             .sorted()
-        #expect(stagedNames == ["UKG (part 1).mp3", "UKG (part 2).mp3", "UKG (part 3).mp3"])
+        #expect(stagedNames == ["UKG (part 1).m4a", "UKG (part 2).m4a", "UKG (part 3).m4a"])
 
         // Coordinator settled into idle (the accumulator-to-pipeline
         // delivery happens via the watcher in production; here we just
@@ -382,8 +389,10 @@ struct ManualUploadCoordinatorMultiFileTests {
             try? FileManager.default.removeItem(at: ledgerFile)
         }
 
-        let p1 = try Self.putFile(named: "A.mp3", in: sourceDir)
-        let p2 = try Self.putFile(named: "B.mp3", in: sourceDir)
+        // .m4a to skip the v0.5.4 MP3 normalisation step in this
+        // mechanics-of-the-window test.
+        let p1 = try Self.putFile(named: "A.m4a", in: sourceDir)
+        let p2 = try Self.putFile(named: "B.m4a", in: sourceDir)
 
         // Long settle delay so we have time to inspect post-stop state.
         let (f, sink) = await Self.makeFixture(
@@ -405,8 +414,8 @@ struct ManualUploadCoordinatorMultiFileTests {
         // coordinator correctly opened a window, these get buffered
         // and emit as `.batch` on settle. If it didn't, each emits as
         // `.single`.
-        let stagedA = watchDir.appendingPathComponent("A.mp3")
-        let stagedB = watchDir.appendingPathComponent("B.mp3")
+        let stagedA = watchDir.appendingPathComponent("A.m4a")
+        let stagedB = watchDir.appendingPathComponent("B.m4a")
         await f.accumulator.ingest(stagedA, creationDate: Date())
         await f.accumulator.ingest(stagedB, creationDate: Date())
 
@@ -440,7 +449,10 @@ struct ManualUploadCoordinatorMultiFileTests {
             try? FileManager.default.removeItem(at: ledgerFile)
         }
 
-        let source = try Self.putFile(named: "Re-upload.mp3", in: sourceDir)
+        // .m4a so the v0.5.4 MP3 normalisation step doesn't run — the
+        // ledger-forget test wants the source and the target to share
+        // a path, which they wouldn't if mp3 normalised to m4a.
+        let source = try Self.putFile(named: "Re-upload.m4a", in: sourceDir)
 
         let (f, _) = await Self.makeFixture(watchFolder: watchDir, ledgerFile: ledgerFile)
 
@@ -448,7 +460,7 @@ struct ManualUploadCoordinatorMultiFileTests {
         // stage at — simulating a previous failed attempt. v0.5.0 would
         // have left this entry in place and the watcher would silently
         // skip the new copy.
-        let expectedTarget = watchDir.appendingPathComponent("Re-upload.mp3")
+        let expectedTarget = watchDir.appendingPathComponent("Re-upload.m4a")
         try await f.ledger.record(expectedTarget)
         #expect(await f.ledger.contains(expectedTarget))
 
@@ -478,8 +490,10 @@ struct ManualUploadCoordinatorMultiFileTests {
             try? FileManager.default.removeItem(at: watchDir)
         }
 
-        let p1 = try Self.putFile(named: "A.mp3", in: sourceDir)
-        let p2 = try Self.putFile(named: "B.mp3", in: sourceDir)
+        // .m4a so the test fails on the "missing accumulator" guardrail
+        // before AVAssetExportSession tries to decode our fake bytes.
+        let p1 = try Self.putFile(named: "A.m4a", in: sourceDir)
+        let p2 = try Self.putFile(named: "B.m4a", in: sourceDir)
 
         let defaults = EphemeralUserDefaults.make()
         let keychain = InMemoryKeychain()
@@ -514,6 +528,58 @@ struct ManualUploadCoordinatorMultiFileTests {
         } else {
             Issue.record("Expected coordinator to fail when accumulator missing; status=\(coordinator.status)")
         }
+    }
+}
+
+// MARK: - v0.5.4 normalisation routing
+
+/// Pure-function tests for the static decision helper that picks
+/// between "stage directly" and "transcode to m4a first". Keeps the
+/// MP3-normalisation rule honest without standing up the coordinator.
+struct ManualUploadNormalizationRoutingTests {
+
+    @Test
+    func mp4_alwaysNormalizes() {
+        #expect(ManualUploadCoordinator.needsNormalization(
+            kind: .videoMP4, extension: "mp4"
+        ))
+    }
+
+    @Test
+    func mp3_normalizes() {
+        // v0.5.4: every MP3 gets re-encoded to dodge AH-split/Whisper-
+        // decode 400s. The trade-off (a sub-second AAC re-encode per
+        // file) is accepted in favour of the never-fails property.
+        #expect(ManualUploadCoordinator.needsNormalization(
+            kind: .audio, extension: "mp3"
+        ))
+    }
+
+    @Test
+    func m4a_passesThrough() {
+        // Already a clean AAC-in-m4a — re-encoding would just waste
+        // time and bleed a little fidelity.
+        #expect(!ManualUploadCoordinator.needsNormalization(
+            kind: .audio, extension: "m4a"
+        ))
+    }
+
+    @Test
+    func wav_passesThrough() {
+        // Uncompressed, every decoder handles it. No point re-encoding.
+        #expect(!ManualUploadCoordinator.needsNormalization(
+            kind: .audio, extension: "wav"
+        ))
+    }
+
+    @Test
+    func extension_isCaseInsensitive() {
+        #expect(ManualUploadCoordinator.needsNormalization(
+            kind: .audio, extension: "MP3"
+        ))
+        #expect(!ManualUploadCoordinator.needsNormalization(
+            kind: .audio, extension: "M4A"
+        ))
     }
 }
 

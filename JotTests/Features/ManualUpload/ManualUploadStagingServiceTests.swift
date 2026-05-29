@@ -37,7 +37,7 @@ struct ManualUploadStagingServiceTests {
         let service = ManualUploadStagingService()
 
         let kind = try service.validate(url)
-        #expect(kind == .audioMP3)
+        #expect(kind == .audio)
     }
 
     @Test
@@ -59,17 +59,43 @@ struct ManualUploadStagingServiceTests {
         let service = ManualUploadStagingService()
 
         let kind = try service.validate(url)
-        #expect(kind == .audioMP3)
+        #expect(kind == .audio)
+    }
+
+    // MARK: - v0.5.3 extra audio formats
+
+    @Test
+    func validate_m4a_returnsAudioKind() throws {
+        // m4a was rejected before v0.5.3 — added so users can upload
+        // afconvert-normalized files when Whisper rejects a raw MP3.
+        let dir = try Self.makeTempDir()
+        defer { Self.cleanUp(dir) }
+        let url = try Self.putFile(named: "recording.m4a", in: dir)
+        let service = ManualUploadStagingService()
+
+        let kind = try service.validate(url)
+        #expect(kind == .audio)
+    }
+
+    @Test
+    func validate_wav_returnsAudioKind() throws {
+        let dir = try Self.makeTempDir()
+        defer { Self.cleanUp(dir) }
+        let url = try Self.putFile(named: "recording.wav", in: dir)
+        let service = ManualUploadStagingService()
+
+        let kind = try service.validate(url)
+        #expect(kind == .audio)
     }
 
     @Test
     func validate_unsupportedExtension_throws() throws {
         let dir = try Self.makeTempDir()
         defer { Self.cleanUp(dir) }
-        let url = try Self.putFile(named: "clip.wav", in: dir)
+        let url = try Self.putFile(named: "clip.aif", in: dir)
         let service = ManualUploadStagingService()
 
-        #expect(throws: ManualUploadError.unsupportedFormat("wav")) {
+        #expect(throws: ManualUploadError.unsupportedFormat("aif")) {
             _ = try service.validate(url)
         }
     }

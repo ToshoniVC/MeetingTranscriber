@@ -286,7 +286,7 @@ final class ManualUploadCoordinator {
         var tempArtifact: URL?
         let stagingSource: URL
         switch kind {
-        case .audioMP3:
+        case .audio:
             stagingSource = source
         case .videoMP4:
             status = .converting(filename: source.lastPathComponent)
@@ -365,7 +365,7 @@ final class ManualUploadCoordinator {
             for entry in sources {
                 let stagingSource: URL
                 switch entry.kind {
-                case .audioMP3:
+                case .audio:
                     stagingSource = entry.url
                 case .videoMP4:
                     status = .converting(filename: entry.url.lastPathComponent)

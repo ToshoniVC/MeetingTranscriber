@@ -27,13 +27,18 @@ final class SystemManualUploadFilePicker: ManualUploadFilePicking {
         NSApp.activate(ignoringOtherApps: true)
         let panel = NSOpenPanel()
         panel.title = "Upload Recording"
-        panel.message = "Pick one or more .mp3 / .mp4 files. Multiple files become one meeting."
+        panel.message = "Pick one or more .mp3 / .m4a / .wav / .mp4 files. Multiple files become one meeting."
         panel.prompt = "Upload"
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = true
         panel.canCreateDirectories = false
-        panel.allowedContentTypes = [.mp3, .mpeg4Movie]
+        // v0.5.3 expanded from mp3+mp4 to also accept m4a and wav —
+        // mirrors the existing watcher's `SupportedAudioType`, and
+        // unblocks the workaround for the Audio Hijack split-MP3 +
+        // Whisper-can't-decode case (users re-encode to m4a via
+        // `afconvert` and then need a way to upload the result).
+        panel.allowedContentTypes = [.mp3, .mpeg4Audio, .wav, .mpeg4Movie]
 
         let response = panel.runModal()
         guard response == .OK else { return [] }

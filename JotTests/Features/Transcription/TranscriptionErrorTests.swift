@@ -122,4 +122,48 @@ struct TranscriptionErrorMapperTests {
             #expect(!error.userFacingMessage.isEmpty, "Empty message for \(error)")
         }
     }
+
+    // MARK: - v0.5.2: server-error body in user-facing message
+
+    @Test
+    func serverError_userFacingMessage_includesBodySnippet() {
+        let error = TranscriptionError.serverError(
+            status: 400,
+            body: #"{"error":{"message":"Invalid file format","type":"invalid_request_error"}}"#
+        )
+        let message = error.userFacingMessage
+        #expect(message.contains("HTTP 400"))
+        #expect(message.contains("Invalid file format"),
+                "Expected the body's message to surface, got: \(message)")
+    }
+
+    @Test
+    func serverError_userFacingMessage_emptyBody_keepsLegacyShape() {
+        // Empty body → fall back to the v0.5.1-and-earlier wording so
+        // tests / docs that match on "Server returned HTTP 400." still
+        // line up.
+        let error = TranscriptionError.serverError(status: 400, body: "")
+        #expect(error.userFacingMessage == "Server returned HTTP 400.")
+    }
+
+    @Test
+    func normalizedBodySnippet_collapsesNewlinesAndTabs() {
+        let raw = "line one\r\nline two\n\tindented\n\nblank"
+        let snippet = TranscriptionError.normalizedBodySnippet(raw)
+        #expect(snippet == "line one line two indented blank")
+    }
+
+    @Test
+    func normalizedBodySnippet_capsAtMaxLength() {
+        let long = String(repeating: "a", count: 500)
+        let snippet = TranscriptionError.normalizedBodySnippet(long, maxLength: 50)
+        #expect(snippet.count == 51, "50 chars + ellipsis")
+        #expect(snippet.hasSuffix("…"))
+    }
+
+    @Test
+    func normalizedBodySnippet_emptyInput_returnsEmpty() {
+        #expect(TranscriptionError.normalizedBodySnippet("") == "")
+        #expect(TranscriptionError.normalizedBodySnippet("   \n  \t  ") == "")
+    }
 }

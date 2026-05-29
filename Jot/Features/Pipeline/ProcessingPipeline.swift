@@ -490,9 +490,19 @@ actor ProcessingPipeline {
             // 2. Transcribe each part in order. Same prompt for every
             // part — the compiled context is the user's whole-meeting
             // intent and applies to all parts.
+            //
+            // **Pacing.** The loop is already serial via `await` (each
+            // part waits for the previous one to complete), but v0.5.2
+            // adds a small inter-part sleep so a long batch can't trip
+            // either provider's per-minute request limit. 250 ms is
+            // negligible against a 10–30 s transcription but
+            // meaningfully spaces out the per-meeting burst pattern.
             var partResults: [TranscriptionResult] = []
             partResults.reserveCapacity(renamedParts.count)
-            for part in renamedParts {
+            for (index, part) in renamedParts.enumerated() {
+                if index > 0 {
+                    try? await Task.sleep(nanoseconds: Self.interPartDelayNanos)
+                }
                 let result = try await runTranscription(
                     audio: part,
                     prompt: prompt
@@ -790,6 +800,13 @@ actor ProcessingPipeline {
     /// folders chronological sort order in Finder. Uses `en_US_POSIX` to
     /// keep the format locale-independent; uses the current `TimeZone` so
     /// the prefix matches the user's wall-clock view of the meeting.
+    /// v0.5.2: pause between back-to-back batch parts. Small enough
+    /// to be invisible against a real transcription (10–30 s) but
+    /// enough to space out the request burst pattern when a user
+    /// uploads many parts in a row, so the per-minute rate limit on
+    /// either provider doesn't pile up. 250 ms = 0.25 s.
+    private static let interPartDelayNanos: UInt64 = 250_000_000
+
     private static let timestampFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")

@@ -116,10 +116,18 @@ actor TranscriptionClient {
             throw TranscriptionError.malformedResponse
         }
 
+        let bodyString = String(data: data, encoding: .utf8) ?? ""
         if let typed = TranscriptionErrorMapper.error(
             forStatus: http.statusCode,
-            bodyHint: String(data: data, encoding: .utf8) ?? ""
+            bodyHint: bodyString
         ) {
+            // v0.5.2: log the verbatim server body at error level so
+            // Console.app captures it even when the rotating
+            // transcriber swallows individual provider failures while
+            // falling through. The user-facing error already includes
+            // a truncated snippet (`TranscriptionError.userFacingMessage`)
+            // — this log is the full unfiltered version for debugging.
+            Log.transcription.error("HTTP \(http.statusCode, privacy: .public) from \(request.urlRequest.url?.absoluteString ?? "<unknown URL>", privacy: .public): \(bodyString, privacy: .public)")
             throw typed
         }
 

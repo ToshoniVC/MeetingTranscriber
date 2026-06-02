@@ -7,7 +7,7 @@ Auto-loaded by Claude Code at session start. The full standing instructions live
 
 ## Active spec & plan
 
-- **Active PRD:** [`PRD/ManualUpload_PRD_2026_05_28.md`](PRD/ManualUpload_PRD_2026_05_28.md) — feature spec for manually uploading `.mp3` or `.mp4` files and routing them through the existing watcher → transcription pipeline.
+- **Active PRD:** [`PRD/StreamingTranscription_PRD_2026_06_02.md`](PRD/StreamingTranscription_PRD_2026_06_02.md) — transcribe each Audio Hijack part as it's finalized *during* recording so the full transcript lands shortly after Stop (v0.6.0).
 - **Active implementation plan:** [`Claude/implementation-plan.md`](Claude/implementation-plan.md) — phased build plan for the active PRD.
 - **Backlog:** [`PRD/Backlog.md`](PRD/Backlog.md).
 
@@ -23,3 +23,5 @@ Foundation specs and shipped-milestone plans. Useful for historical context, not
 - [`Claude/archive/implementation-plan_createNotionMeeting_v2026_05_28.md`](Claude/archive/implementation-plan_createNotionMeeting_v2026_05_28.md) — phased build plan for the Notion meeting-creation PRD (Phases A–F).
 - [`PRD/archive/CreateClaudeCodeMeetingNotes_PRD_2026_05_28.md`](PRD/archive/CreateClaudeCodeMeetingNotes_PRD_2026_05_28.md) — Claude Code routine trigger PRD (post-Notion fire that generates meeting notes inside the page). Shipped in v0.4.x.
 - [`Claude/archive/implementation-plan_claudeCodeMeetingNotes_v2026_05_28.md`](Claude/archive/implementation-plan_claudeCodeMeetingNotes_v2026_05_28.md) — phased build plan for the Claude Code Meeting Notes PRD (Phases A–F).
+- [`PRD/archive/ManualUpload_PRD_2026_05_28.md`](PRD/archive/ManualUpload_PRD_2026_05_28.md) — Manual Upload PRD (file picker + staging to route dropped `.mp3`/`.mp4` files through the existing pipeline). Shipped in v0.5.x.
+- [`Claude/archive/implementation-plan_manualUpload_v2026_05_28.md`](Claude/archive/implementation-plan_manualUpload_v2026_05_28.md) — phased build plan for the Manual Upload PRD.

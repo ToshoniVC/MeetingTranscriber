@@ -61,6 +61,7 @@ final class ManualUploadCoordinator {
     private let settings: AppSettings
     private let auditLog: AuditLogStore
     private let organizations: OrganizationStore
+    private let generalContext: GeneralContextStore
     private let meetingContextStore: MeetingContextStore
     private let batchAccumulator: MeetingBatchAccumulator?
     private let processedFilesLedger: ProcessedFilesLedger?
@@ -78,6 +79,7 @@ final class ManualUploadCoordinator {
         settings: AppSettings,
         auditLog: AuditLogStore,
         organizations: OrganizationStore,
+        generalContext: GeneralContextStore? = nil,
         meetingContextStore: MeetingContextStore,
         batchAccumulator: MeetingBatchAccumulator? = nil,
         processedFilesLedger: ProcessedFilesLedger? = nil,
@@ -90,6 +92,10 @@ final class ManualUploadCoordinator {
         self.settings = settings
         self.auditLog = auditLog
         self.organizations = organizations
+        // Mirrors the `prompter` pattern below: production injects the shared
+        // store; tests that don't care get a default-disk one (consistent
+        // with how they already default `organizations` / `auditLog`).
+        self.generalContext = generalContext ?? GeneralContextStore()
         self.meetingContextStore = meetingContextStore
         self.batchAccumulator = batchAccumulator
         self.processedFilesLedger = processedFilesLedger
@@ -216,10 +222,13 @@ final class ManualUploadCoordinator {
         // 5. Compile the snapshot the pipeline will see.
         let startedAt = Date()
         let organization = inputs.organizationId.flatMap { organizations.organization(id: $0) }
+        let general = generalContext.current
         let compiledContext = ContextCompiler.compile(
             meetingName: trimmedName,
             meetingSpecificContext: inputs.meetingSpecificContext,
-            organization: organization
+            organization: organization,
+            wrapperPrefix: general.wrapperPrefix,
+            generalContext: general.generalContext
         )
         let snapshot = MeetingContextSnapshot(
             meetingName: trimmedName,

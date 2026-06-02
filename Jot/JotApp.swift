@@ -13,6 +13,7 @@ struct JotApp: App {
     @State private var settings: AppSettings
     @State private var auditLog: AuditLogStore
     @State private var organizations: OrganizationStore
+    @State private var generalContext: GeneralContextStore
     @State private var providers: ProviderStore
     @State private var meetingContextStore: MeetingContextStore
     @State private var pipeline: PipelineCoordinator
@@ -30,6 +31,9 @@ struct JotApp: App {
         let settings = AppSettings()
         let auditLog = AuditLogStore()
         let organizations = OrganizationStore()
+        // v0.5.6: app-wide context (editable wrapper prompt + general
+        // always-applied context) that feeds every ContextCompiler.compile.
+        let generalContext = GeneralContextStore()
         // v0.4.5: multiple transcription providers, ordered fallback
         // chain. The store is the single source of truth; legacy
         // single-provider migration runs before the pipeline starts.
@@ -76,6 +80,7 @@ struct JotApp: App {
             menuBar: menuBar,
             auditLog: auditLog,
             organizations: organizations,
+            generalContext: generalContext,
             meetingContextStore: meetingContextStore,
             batchAccumulator: batchAccumulator
         )
@@ -87,6 +92,7 @@ struct JotApp: App {
             settings: settings,
             auditLog: auditLog,
             organizations: organizations,
+            generalContext: generalContext,
             meetingContextStore: meetingContextStore,
             batchAccumulator: batchAccumulator,
             processedFilesLedger: processedFilesLedger
@@ -95,6 +101,7 @@ struct JotApp: App {
         self._settings = State(initialValue: settings)
         self._auditLog = State(initialValue: auditLog)
         self._organizations = State(initialValue: organizations)
+        self._generalContext = State(initialValue: generalContext)
         self._providers = State(initialValue: providers)
         self._meetingContextStore = State(initialValue: meetingContextStore)
         self._pipeline = State(initialValue: pipeline)
@@ -155,6 +162,7 @@ struct JotApp: App {
                 .environment(settings)
                 .environment(auditLog)
                 .environment(organizations)
+                .environment(generalContext)
                 .environment(providers)
                 .environment(meetingContextStore)
                 .environment(pipeline)
@@ -178,6 +186,7 @@ struct JotApp: App {
             CurrentMeetingEditorView()
                 .environment(meetingContextStore)
                 .environment(organizations)
+                .environment(generalContext)
         }
         .windowResizability(.contentSize)
     }

@@ -46,6 +46,45 @@ struct TranscriptionResult: Sendable, Equatable {
         let start: Double
         let end: Double
         let text: String
+
+        /// Per-segment quality signals from Whisper's `verbose_json`, used by
+        /// `TranscriptionSegmentFilter` to drop hallucinated output (the
+        /// prompt-echo / silence-noise a long quiet lead-in produces). All
+        /// optional: endpoints that omit them simply opt that segment out of
+        /// confidence filtering. Not carried across `merging(_:)` — filtering
+        /// happens per-part before merge, so the merged result never needs
+        /// them again.
+        var avgLogprob: Double? = nil
+        var noSpeechProb: Double? = nil
+        var compressionRatio: Double? = nil
+    }
+
+    /// Drop segments that look like hallucinations and rebuild `text` from the
+    /// survivors. Timeline-neutral: surviving segments keep their original
+    /// `start`/`end`, so anything keyed to recording time stays aligned.
+    /// `rawJSON` is intentionally left untouched — it's the verbatim server
+    /// response kept for reproducibility, and it's useful to see *what* got
+    /// filtered. No-op (returns `self`) when there are no segments or nothing
+    /// is filtered.
+    func filteringLikelyHallucinations(
+        thresholds: TranscriptionSegmentFilter.Thresholds = .default
+    ) -> TranscriptionResult {
+        guard !segments.isEmpty else { return self }
+        let kept = TranscriptionSegmentFilter.filter(segments, thresholds: thresholds)
+        guard kept.count != segments.count else { return self }
+
+        // Whisper segment text carries its own leading spacing, so the
+        // server's full text is the segments concatenated. Rebuild the same
+        // way, then trim the outer whitespace.
+        let rebuilt = kept.map(\.text).joined()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return TranscriptionResult(
+            text: rebuilt,
+            duration: duration,
+            segments: kept,
+            rawJSON: rawJSON,
+            providerName: providerName
+        )
     }
 
     // MARK: - Merging (multi-part recordings)

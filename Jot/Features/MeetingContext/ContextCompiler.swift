@@ -9,9 +9,15 @@ import Foundation
 /// (Phase G) useful as a reproducibility artifact.
 enum ContextCompiler {
 
-    /// One-liner that sets up Whisper to interpret the rest of the prompt
-    /// as a glossary of names and terms.
-    static let systemPrefix = "Transcription context. Names and terms used in this audio:"
+    /// Default lead-in that sets up Whisper to interpret the rest of the
+    /// prompt as a glossary of names and terms. Kept deliberately short and
+    /// label-like rather than a full sentence: during leading silence Whisper
+    /// can regurgitate the prompt as if it were spoken, and a terse fragment
+    /// is far less echo-prone than a prose sentence. This is only the
+    /// *fallback* — the live value is user-editable via `GeneralContext`
+    /// (Context tab → General), so callers normally pass `wrapperPrefix`
+    /// explicitly.
+    static let defaultWrapperPrefix = "Reference terms for this recording:"
 
     /// Compile per PRD §6. Returns `""` if there's nothing meaningful to
     /// send (no organization and no meeting-specific context) — callers
@@ -20,19 +26,36 @@ enum ContextCompiler {
         meetingName: String,
         meetingSpecificContext: String?,
         organization: Organization?,
+        wrapperPrefix: String = defaultWrapperPrefix,
+        generalContext: String? = nil,
         budget: ContextCompilerBudget = .default
     ) -> String {
         let trimmedMeetingContext = (meetingSpecificContext ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedName = meetingName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedGeneral = (generalContext ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedPrefix = wrapperPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Per PRD §6: no org and no meeting-specific context → empty.
-        // Meeting name alone is too weak a signal to bother including.
-        if organization == nil && trimmedMeetingContext.isEmpty {
+        // Per PRD §6 (extended): with no org, no meeting-specific context, and
+        // no general context there's nothing worth sending. Emitting the bare
+        // wrapper prefix on its own is exactly the echo-bait we want to avoid,
+        // and the meeting name alone is too weak a signal to bother including.
+        if organization == nil && trimmedMeetingContext.isEmpty && trimmedGeneral.isEmpty {
             return ""
         }
 
-        var sections: [Section] = [Section(kind: .prefix, content: systemPrefix)]
+        var sections: [Section] = []
+        // An empty wrapper prefix (user cleared it) is honored — we just omit
+        // the lead-in rather than emitting a blank line.
+        if !trimmedPrefix.isEmpty {
+            sections.append(Section(kind: .prefix, content: trimmedPrefix))
+        }
+        // Global, always-applied context sits right after the lead-in so it
+        // frames every meeting regardless of which organization is selected.
+        if !trimmedGeneral.isEmpty {
+            sections.append(Section(kind: .generalContext, content: trimmedGeneral))
+        }
 
         if let org = organization {
             let identity = renderIdentity(org)
@@ -80,6 +103,7 @@ enum ContextCompiler {
 
         enum Kind {
             case prefix
+            case generalContext
             case orgIdentity
             case staff
             case projects
@@ -90,17 +114,21 @@ enum ContextCompiler {
 
             /// Higher = dropped first under budget pressure. `nil` = never
             /// dropped (prefix is tiny; org identity is the most valuable
-            /// signal once the user named an org).
+            /// signal once the user named an org). General context is the
+            /// stickiest *droppable* section — the user deliberately set it to
+            /// apply to every meeting, so it survives longer than per-org and
+            /// per-meeting sections.
             var dropPriority: Int? {
                 switch self {
                 case .prefix: return nil
                 case .orgIdentity: return nil
-                case .staff: return 1
-                case .projects: return 2
-                case .glossary: return 3
-                case .orgNotes: return 4
-                case .meetingName: return 5
-                case .meetingContext: return 6
+                case .generalContext: return 1
+                case .staff: return 2
+                case .projects: return 3
+                case .glossary: return 4
+                case .orgNotes: return 5
+                case .meetingName: return 6
+                case .meetingContext: return 7
                 }
             }
         }

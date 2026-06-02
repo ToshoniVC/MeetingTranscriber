@@ -149,25 +149,39 @@ actor TranscriptionClient {
 
         let segments: [TranscriptionResult.Segment] = (decoded.segments ?? []).compactMap { raw in
             guard let start = raw.start, let end = raw.end, let text = raw.text else { return nil }
-            return TranscriptionResult.Segment(start: start, end: end, text: text)
+            return TranscriptionResult.Segment(
+                start: start,
+                end: end,
+                text: text,
+                avgLogprob: raw.avgLogprob,
+                noSpeechProb: raw.noSpeechProb,
+                compressionRatio: raw.compressionRatio
+            )
         }
 
-        return TranscriptionResult(
+        let result = TranscriptionResult(
             text: decoded.text.trimmingCharacters(in: CharacterSet.newlines),
             duration: decoded.duration,
             segments: segments,
             rawJSON: data
         )
+        // Drop hallucination segments (prompt-echo / silence noise) before the
+        // result leaves the client — applies to single files and, since the
+        // batch path filters each part here too, to multi-part meetings before
+        // they're merged. `rawJSON` stays the verbatim server response.
+        return result.filteringLikelyHallucinations()
     }
 
     // MARK: - Decoding
 
     /// Subset of the `verbose_json` response we decode. The full payload
-    /// has more fields (`task`, `language`, per-segment metadata like
-    /// `tokens`, `avg_logprob`, etc.); we keep the model narrow so a future
-    /// server-side addition doesn't break decoding. The unmodeled fields
-    /// still survive the round-trip on disk because `FileOrganizer` writes
-    /// the verbatim `rawJSON` bytes, not a re-encoded form of this struct.
+    /// has more fields (`task`, `language`, per-segment `tokens`,
+    /// `temperature`, etc.); we decode only what we use — the transcript,
+    /// timing, and the three per-segment confidence signals
+    /// (`avg_logprob`, `no_speech_prob`, `compression_ratio`) that
+    /// `TranscriptionSegmentFilter` needs. Unmodeled fields still survive the
+    /// round-trip on disk because `FileOrganizer` writes the verbatim
+    /// `rawJSON` bytes, not a re-encoded form of this struct.
     private struct VerboseTranscriptionResponse: Decodable {
         let text: String
         let duration: Double?
@@ -177,6 +191,16 @@ actor TranscriptionClient {
             let start: Double?
             let end: Double?
             let text: String?
+            let avgLogprob: Double?
+            let noSpeechProb: Double?
+            let compressionRatio: Double?
+
+            enum CodingKeys: String, CodingKey {
+                case start, end, text
+                case avgLogprob = "avg_logprob"
+                case noSpeechProb = "no_speech_prob"
+                case compressionRatio = "compression_ratio"
+            }
         }
     }
 

@@ -1,10 +1,12 @@
 import SwiftUI
 
-/// Left pane of the Context tab: the list of saved organizations plus
-/// add/delete controls. Selection drives the detail pane on the right.
+/// Left pane of the Context tab: a pinned "General" entry above the list of
+/// saved organizations, plus add/delete controls. Selection drives the detail
+/// pane on the right. Add/delete operate on organizations only — "General"
+/// always exists and can't be removed.
 struct OrganizationsListView: View {
     @Environment(OrganizationStore.self) private var store
-    @Binding var selection: UUID?
+    @Binding var selection: ContextSelection?
     let onAdd: () -> Void
     let onDelete: (UUID) -> Void
 
@@ -12,14 +14,28 @@ struct OrganizationsListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            List(store.organizations, selection: $selection) { org in
-                row(for: org)
-                    .tag(org.id)
-                    .contextMenu {
-                        Button("Delete", role: .destructive) {
-                            deleteCandidate = org
-                        }
+            List(selection: $selection) {
+                Section {
+                    Label("General", systemImage: "globe")
+                        .tag(ContextSelection.general)
+                }
+
+                Section("Organizations") {
+                    ForEach(store.organizations) { org in
+                        row(for: org)
+                            .tag(ContextSelection.organization(org.id))
+                            .contextMenu {
+                                Button("Delete", role: .destructive) {
+                                    deleteCandidate = org
+                                }
+                            }
                     }
+                    if store.organizations.isEmpty {
+                        Text("No organizations yet")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .listStyle(.sidebar)
 
@@ -34,7 +50,7 @@ struct OrganizationsListView: View {
                 .help("New organization")
 
                 Button {
-                    if let id = selection,
+                    if case .organization(let id) = selection,
                        let org = store.organization(id: id) {
                         deleteCandidate = org
                     }
@@ -43,7 +59,7 @@ struct OrganizationsListView: View {
                         .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.plain)
-                .disabled(selection == nil)
+                .disabled(!isOrgSelected)
                 .help("Delete selected organization")
 
                 Spacer()
@@ -67,6 +83,11 @@ struct OrganizationsListView: View {
         } message: { _ in
             Text("Meetings already filed under this organization are unaffected. Future meetings will need a new selection.")
         }
+    }
+
+    private var isOrgSelected: Bool {
+        if case .organization = selection { return true }
+        return false
     }
 
     @ViewBuilder

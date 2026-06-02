@@ -35,7 +35,7 @@ struct ContextCompilerTests {
             meetingSpecificContext: "Discussing Q3 roadmap.",
             organization: nil
         )
-        #expect(out.contains(ContextCompiler.systemPrefix))
+        #expect(out.contains(ContextCompiler.defaultWrapperPrefix))
         #expect(out.contains("Discussing Q3 roadmap."))
         #expect(out.contains("Meeting: Sync"))
     }
@@ -61,7 +61,7 @@ struct ContextCompilerTests {
 
         // Each label should appear in PRD §6 order. Use range-based
         // comparisons so we're robust to formatting tweaks.
-        let prefix = out.range(of: ContextCompiler.systemPrefix)!
+        let prefix = out.range(of: ContextCompiler.defaultWrapperPrefix)!
         let identity = out.range(of: "Organization: Acme (Acme Holdings)")!
         let staff = out.range(of: "Staff: Alice")!
         let projects = out.range(of: "Projects: Phoenix")!
@@ -268,6 +268,100 @@ struct ContextCompilerTests {
         #expect(out.contains("Élodie"))
         #expect(out.contains("山田太郎"))
         #expect(out.contains("Müller"))
+    }
+
+    // MARK: - Wrapper prefix + general context (v0.5.6)
+
+    @Test
+    func compile_customWrapperPrefix_replacesDefault() {
+        let out = ContextCompiler.compile(
+            meetingName: "Sync",
+            meetingSpecificContext: "Body.",
+            organization: nil,
+            wrapperPrefix: "Glossary:"
+        )
+        #expect(out.contains("Glossary:"))
+        #expect(!out.contains(ContextCompiler.defaultWrapperPrefix))
+    }
+
+    @Test
+    func compile_emptyWrapperPrefix_omitsLeadIn() {
+        let out = ContextCompiler.compile(
+            meetingName: "Sync",
+            meetingSpecificContext: "Body text.",
+            organization: nil,
+            wrapperPrefix: "   "
+        )
+        // No blank lead-in line; body still present, and the output starts
+        // with real content rather than an empty prefix line.
+        #expect(out.contains("Body text."))
+        #expect(!out.contains(ContextCompiler.defaultWrapperPrefix))
+        #expect(!out.hasPrefix("\n"))
+        #expect(out.hasPrefix("Meeting: Sync"))
+    }
+
+    @Test
+    func compile_generalContextOnly_isNotEmptyAndAppearsAfterPrefix() {
+        // General context alone (no org, no meeting-specific) is enough to
+        // emit a prompt — it's deliberately global.
+        let out = ContextCompiler.compile(
+            meetingName: "Sync",
+            meetingSpecificContext: nil,
+            organization: nil,
+            wrapperPrefix: "Lead:",
+            generalContext: "Pronounce Niels as 'Nells'."
+        )
+        #expect(!out.isEmpty)
+        let prefix = out.range(of: "Lead:")!
+        let general = out.range(of: "Pronounce Niels")!
+        #expect(prefix.lowerBound < general.lowerBound)
+    }
+
+    @Test
+    func compile_noOrgNoMeetingNoGeneral_returnsEmptyEvenWithPrefix() {
+        let out = ContextCompiler.compile(
+            meetingName: "Sync",
+            meetingSpecificContext: nil,
+            organization: nil,
+            wrapperPrefix: "Reference terms:",
+            generalContext: "   "
+        )
+        #expect(out.isEmpty)
+    }
+
+    @Test
+    func compile_generalContextOrderedBeforeOrg() {
+        let org = Organization(name: "Acme", staffNames: ["Alice"])
+        let out = ContextCompiler.compile(
+            meetingName: "Sync",
+            meetingSpecificContext: nil,
+            organization: org,
+            wrapperPrefix: "Lead:",
+            generalContext: "GLOBALCTX"
+        )
+        let general = out.range(of: "GLOBALCTX")!
+        let identity = out.range(of: "Organization: Acme")!
+        #expect(general.lowerBound < identity.lowerBound)
+    }
+
+    @Test
+    func compile_overBudget_generalContextStickierThanStaff() {
+        // Staff list big enough to force a drop; general context should
+        // survive while staff is dropped.
+        let staff = (0..<80).map { "Staff Member \($0)" }
+        let org = Organization(name: "Acme", staffNames: staff)
+        let budget = ContextCompilerBudget(maxCharacters: 120)
+        let out = ContextCompiler.compile(
+            meetingName: "Sync",
+            meetingSpecificContext: nil,
+            organization: org,
+            wrapperPrefix: "Lead:",
+            generalContext: "KEEPME",
+            budget: budget
+        )
+        #expect(out.count <= 120)
+        #expect(out.contains("KEEPME"))
+        #expect(out.contains("Organization: Acme"))
     }
 
     @Test

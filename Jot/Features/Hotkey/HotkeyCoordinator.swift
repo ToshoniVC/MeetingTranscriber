@@ -25,6 +25,7 @@ final class HotkeyCoordinator {
     private let menuBar: MenuBarController
     private let auditLog: AuditLogStore
     private let organizations: OrganizationStore
+    private let generalContext: GeneralContextStore
     private let meetingContextStore: MeetingContextStore
 
     /// Long-lived (app-lifetime) accumulator that buffers Audio-Hijack-
@@ -60,6 +61,7 @@ final class HotkeyCoordinator {
         menuBar: MenuBarController,
         auditLog: AuditLogStore,
         organizations: OrganizationStore,
+        generalContext: GeneralContextStore? = nil,
         meetingContextStore: MeetingContextStore,
         batchAccumulator: MeetingBatchAccumulator? = nil
     ) {
@@ -70,6 +72,9 @@ final class HotkeyCoordinator {
         self.menuBar = menuBar
         self.auditLog = auditLog
         self.organizations = organizations
+        // Production injects the shared store; tests that don't care get a
+        // default-disk one (consistent with `organizations` / `auditLog`).
+        self.generalContext = generalContext ?? GeneralContextStore()
         self.meetingContextStore = meetingContextStore
         self.batchAccumulator = batchAccumulator
     }
@@ -333,10 +338,13 @@ final class HotkeyCoordinator {
         }
 
         let org = inputs.organizationId.flatMap { organizations.organization(id: $0) }
+        let general = generalContext.current
         let compiled = ContextCompiler.compile(
             meetingName: inputs.meetingName,
             meetingSpecificContext: inputs.meetingSpecificContext,
-            organization: org
+            organization: org,
+            wrapperPrefix: general.wrapperPrefix,
+            generalContext: general.generalContext
         )
         meetingContextStore.recordStarted(
             meetingName: inputs.meetingName,

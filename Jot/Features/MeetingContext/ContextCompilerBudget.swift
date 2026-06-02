@@ -13,9 +13,9 @@ import Foundation
 /// `maxCharacters`): drop sections from the bottom of PRD §6 order
 /// upward — meeting-specific context goes first, then meeting name,
 /// then org freeform notes, then glossary/acronyms, then projects,
-/// then staff. Organization identity (name + company) is *never*
-/// dropped — if the user named an org, that identity is the most
-/// valuable piece of context.
+/// then staff, then the global general-context block (stickiest, since
+/// the user set it to apply to every meeting). Organization identity
+/// (name + company) and the wrapper prefix are *never* dropped.
 struct ContextCompilerBudget: Equatable, Sendable {
     let maxCharacters: Int
 

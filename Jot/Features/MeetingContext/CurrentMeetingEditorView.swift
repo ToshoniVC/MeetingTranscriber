@@ -15,6 +15,7 @@ import SwiftUI
 struct CurrentMeetingEditorView: View {
     @Environment(MeetingContextStore.self) private var contextStore
     @Environment(OrganizationStore.self) private var organizations
+    @Environment(GeneralContextStore.self) private var generalContext
     @Environment(\.dismissWindow) private var dismissWindow
 
     @State private var draftName: String = ""
@@ -123,10 +124,13 @@ struct CurrentMeetingEditorView: View {
         }()
         let effectiveContext = context ?? draftContext
         let org = effectiveOrgID.flatMap { organizations.organization(id: $0) }
+        let general = generalContext.current
         let compiled = ContextCompiler.compile(
             meetingName: effectiveName,
             meetingSpecificContext: effectiveContext.isEmpty ? nil : effectiveContext,
-            organization: org
+            organization: org,
+            wrapperPrefix: general.wrapperPrefix,
+            generalContext: general.generalContext
         )
         contextStore.update(
             meetingName: effectiveName,

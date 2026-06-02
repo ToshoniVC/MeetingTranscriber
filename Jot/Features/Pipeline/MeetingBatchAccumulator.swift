@@ -22,6 +22,21 @@ enum PipelineWorkItem: Sendable, Equatable {
     case batch(MeetingBatch)
 }
 
+/// Result of `MeetingBatchAccumulator.ingest(...)`, telling the pipeline what
+/// to do with a freshly-stabilized file (v0.6.0 streaming transcription).
+enum IngestOutcome: Sendable, Equatable {
+    /// Buffered into an *active* (still-recording) session. Safe to transcribe
+    /// now — the watcher only emits finalized parts — so the pipeline streams
+    /// it ahead and buffers the result. `prompt` is the meeting's compiled
+    /// context (nil when empty), matching what `processBatch` would send.
+    case streamable(prompt: String?)
+    /// Buffered into a session that has already stopped (the trailing part, in
+    /// its settle window). Left for end-of-meeting assembly.
+    case buffered
+    /// Not part of any recording session — emitted immediately as `.single`.
+    case emittedSingle
+}
+
 /// Groups stable file URLs that fall inside a Jot-initiated recording
 /// window into one `MeetingBatch`, so an Audio Hijack split-file
 /// recording (e.g., 30-minute meeting split into 20 MB chunks to stay
@@ -161,15 +176,25 @@ actor MeetingBatchAccumulator {
     /// currently open (or recently closed and within its settle period)
     /// and `creationDate` matches, the URL is buffered. Otherwise it's
     /// emitted as a `.single` straight away.
-    func ingest(_ url: URL, creationDate: Date, now: Date = Date()) async {
+    @discardableResult
+    func ingest(_ url: URL, creationDate: Date, now: Date = Date()) async -> IngestOutcome {
         if var session = currentSession, matches(session: session, creationDate: creationDate, now: now) {
             if !session.parts.contains(where: { $0.url == url }) {
                 session.parts.append(BufferedPart(url: url, creationDate: creationDate))
                 currentSession = session
             }
-            return
+            // Stream-transcribe a part only while the recording is still
+            // active. Once stopped, the trailing part stays buffered for
+            // end-of-meeting assembly (it's the one part we want to upload
+            // *after* Stop).
+            if session.stoppedAt == nil {
+                let compiled = session.snapshot.resolvedCompiledContext
+                return .streamable(prompt: compiled.isEmpty ? nil : compiled)
+            }
+            return .buffered
         }
         await emit(.single(url))
+        return .emittedSingle
     }
 
     // MARK: - Shutdown

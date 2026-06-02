@@ -158,6 +158,15 @@ actor ProcessingPipeline {
     /// pipeline.
     private var notionTasks: [UUID: Task<Void, Never>] = [:]
 
+    /// v0.6.0 streaming transcription: in-flight (or completed) transcriptions
+    /// for recording parts that finalized *during* the meeting, keyed by the
+    /// part's original URL. `processBatch` reuses these at assembly so only the
+    /// trailing part has to upload after Stop. The only consumer is the batch
+    /// path — single-file / manual-upload parts never land here. Cancelled and
+    /// cleared on `stop()`; a cleared buffer just means assembly transcribes
+    /// fresh, so a mid-meeting restart degrades to the pre-0.6 behavior.
+    private var streamingTranscriptions: [URL: Task<TranscriptionResult, Error>] = [:]
+
     init(
         config: PipelineConfig,
         watcher: FolderWatcher,
@@ -239,6 +248,10 @@ actor ProcessingPipeline {
         // cancelled Notion write is silent.
         for task in notionTasks.values { task.cancel() }
         notionTasks.removeAll()
+        // Cancel any in-flight streamed part transcriptions (v0.6.0). The
+        // long-lived accumulator still flushes the meeting at Stop; with an
+        // empty buffer, assembly just transcribes the parts fresh.
+        cancelStreamingTranscriptions()
         // Detach the accumulator's emitter — recording-session state
         // survives a settings-change-induced pipeline restart, but events
         // fired between stop and the next start would land on a torn-down
@@ -257,7 +270,35 @@ actor ProcessingPipeline {
             return
         }
         let creationDate = fileCreationDate(of: url) ?? Date()
-        await batchAccumulator.ingest(url, creationDate: creationDate)
+        let outcome = await batchAccumulator.ingest(url, creationDate: creationDate)
+        // v0.6.0: a part buffered into a still-recording session is already
+        // finalized (the watcher only emits stable files), so transcribe it
+        // now and buffer the result for assembly. Other outcomes need nothing
+        // extra — `.buffered` waits for flush, `.emittedSingle` already routed.
+        if case .streamable(let prompt) = outcome {
+            startStreamingTranscription(url: url, prompt: prompt)
+        }
+    }
+
+    /// Kick off a background transcription for a recording part that finalized
+    /// mid-meeting, storing the task for `processBatch` to await at assembly.
+    /// The task runs on this actor but suspends at the network `await`, so
+    /// concurrent streamed parts interleave without blocking watcher events.
+    private func startStreamingTranscription(url: URL, prompt: String?) {
+        guard streamingTranscriptions[url] == nil else { return }
+        Log.pipeline.info("Streaming transcription for part \(url.lastPathComponent, privacy: .public) while recording continues")
+        streamingTranscriptions[url] = Task { [weak self] in
+            guard let self else { throw CancellationError() }
+            return try await self.runTranscription(audio: url, prompt: prompt)
+        }
+    }
+
+    /// Cancel and drop every in-flight streamed transcription. Called on
+    /// `stop()` so a settings-change restart doesn't leak uploads; the next
+    /// meeting's assembly simply transcribes any un-streamed parts fresh.
+    private func cancelStreamingTranscriptions() {
+        for task in streamingTranscriptions.values { task.cancel() }
+        streamingTranscriptions.removeAll()
     }
 
     /// Dispatch a work item produced by the accumulator's emitter.
@@ -474,41 +515,59 @@ actor ProcessingPipeline {
             resolvedParts.append(await resolvedAudioURL(for: part, anchor: batch.startedAt))
         }
 
-        // 1. Rename each part with the meeting name and a "(part N)"
-        // suffix for N > 1. Part 1 keeps the bare meeting-named filename
-        // so the meeting folder + transcript pick it up via
-        // `FileOrganizer`'s `baseName` lookup. Best-effort: a failed
-        // rename falls back to the original URL.
-        let renamedParts = await renameParts(resolvedParts, snapshot: snapshot)
-
         let prompt = snapshot.resolvedCompiledContext.isEmpty
             ? nil
             : snapshot.resolvedCompiledContext
-        Log.pipeline.info("Batch processing \(renamedParts.count, privacy: .public) parts; prompt attached: \(prompt != nil ? "yes" : "no", privacy: .public)")
+        Log.pipeline.info("Batch processing \(batch.parts.count, privacy: .public) parts; prompt attached: \(prompt != nil ? "yes" : "no", privacy: .public)")
+
+        // Whatever happens, don't let this batch's streamed tasks outlive the
+        // call (covers the early-throw paths below).
+        defer {
+            for part in batch.parts {
+                streamingTranscriptions.removeValue(forKey: part)?.cancel()
+            }
+        }
 
         do {
-            // 2. Transcribe each part in order. Same prompt for every
-            // part — the compiled context is the user's whole-meeting
-            // intent and applies to all parts.
+            // 1. Collect per-part transcriptions in chronological order,
+            // reusing v0.6.0 streamed results (parts that finalized during the
+            // meeting) where present so only the trailing post-Stop part has to
+            // upload now. Transcribe BEFORE renaming so no file is moved out
+            // from under an in-flight upload. A streamed part whose task failed
+            // falls back to a fresh transcription — streaming never adds a new
+            // failure mode.
             //
-            // **Pacing.** The loop is already serial via `await` (each
-            // part waits for the previous one to complete), but v0.5.2
-            // adds a small inter-part sleep so a long batch can't trip
-            // either provider's per-minute request limit. 250 ms is
-            // negligible against a 10–30 s transcription but
-            // meaningfully spaces out the per-meeting burst pattern.
+            // **Pacing.** Streamed parts were already spread across the meeting,
+            // so the v0.5.2 inter-part delay (provider rate-limit politeness)
+            // applies only between *fresh* transcriptions.
             var partResults: [TranscriptionResult] = []
-            partResults.reserveCapacity(renamedParts.count)
-            for (index, part) in renamedParts.enumerated() {
-                if index > 0 {
+            partResults.reserveCapacity(resolvedParts.count)
+            var freshTranscriptions = 0
+            for (index, resolved) in resolvedParts.enumerated() {
+                let originalURL = batch.parts[index]
+                if let streamed = streamingTranscriptions.removeValue(forKey: originalURL) {
+                    do {
+                        partResults.append(try await streamed.value)
+                        continue
+                    } catch is CancellationError {
+                        // fall through to a fresh transcription
+                    } catch {
+                        Log.pipeline.warning("Streamed part \(originalURL.lastPathComponent, privacy: .public) failed (\(error.localizedDescription, privacy: .public)); re-transcribing at assembly")
+                    }
+                }
+                if freshTranscriptions > 0 {
                     try? await Task.sleep(nanoseconds: Self.interPartDelayNanos)
                 }
-                let result = try await runTranscription(
-                    audio: part,
-                    prompt: prompt
-                )
-                partResults.append(result)
+                freshTranscriptions += 1
+                partResults.append(try await runTranscription(audio: resolved, prompt: prompt))
             }
+
+            // 2. Rename each part with the meeting name and a "(part N)"
+            // suffix for N > 1 now that every upload is done. Part 1 keeps the
+            // bare meeting-named filename so the meeting folder + transcript
+            // pick it up via `FileOrganizer`'s `baseName` lookup. Best-effort:
+            // a failed rename falls back to the original URL.
+            let renamedParts = await renameParts(resolvedParts, snapshot: snapshot)
 
             // 3. Merge per-part results into one logical transcription.
             // Segment timestamps are shifted by cumulative part duration

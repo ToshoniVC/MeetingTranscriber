@@ -359,6 +359,61 @@ struct MeetingBatchAccumulatorTests {
         }
     }
 
+    // MARK: - Streaming signal (v0.6.0)
+
+    @Test
+    func ingest_duringActiveSession_returnsStreamableWithPrompt() async {
+        let (acc, _) = await Self.makeAccumulator()
+        let startedAt = Self.anchoredStart()
+        let snapshot = MeetingContextSnapshot(
+            meetingName: "Demo",
+            organizationId: nil,
+            organizationName: nil,
+            meetingSpecificContext: nil,
+            resolvedCompiledContext: "Reference terms: Niels",
+            lastEditedAt: Date()
+        )
+        await acc.noteRecordingStarted(snapshot: snapshot, at: startedAt)
+
+        let outcome = await acc.ingest(Self.url("part1.mp3"), creationDate: startedAt.addingTimeInterval(30))
+        #expect(outcome == .streamable(prompt: "Reference terms: Niels"))
+    }
+
+    @Test
+    func ingest_duringActiveSession_emptyContext_returnsStreamableNilPrompt() async {
+        let (acc, _) = await Self.makeAccumulator()
+        let startedAt = Self.anchoredStart()
+        // makeSnapshot uses resolvedCompiledContext = "" → prompt should be nil.
+        await acc.noteRecordingStarted(snapshot: Self.makeSnapshot(), at: startedAt)
+
+        let outcome = await acc.ingest(Self.url("part1.mp3"), creationDate: startedAt.addingTimeInterval(30))
+        #expect(outcome == .streamable(prompt: nil))
+    }
+
+    @Test
+    func ingest_afterStop_returnsBuffered_notStreamable() async {
+        // Long settle so the timer can't flush + clear the session mid-test.
+        let acc = MeetingBatchAccumulator(settleDelay: 5)
+        let sink = Sink()
+        await acc.setEmitter { [sink] item in await sink.record(item) }
+
+        let startedAt = Self.anchoredStart()
+        await acc.noteRecordingStarted(snapshot: Self.makeSnapshot(), at: startedAt)
+        await acc.noteRecordingStopped(at: startedAt.addingTimeInterval(60))
+
+        // The trailing part, ingested after Stop within the settle window, is
+        // buffered for end-of-meeting assembly — NOT streamed.
+        let outcome = await acc.ingest(Self.url("final.mp3"), creationDate: startedAt.addingTimeInterval(61))
+        #expect(outcome == .buffered)
+    }
+
+    @Test
+    func ingest_noActiveSession_returnsEmittedSingle() async {
+        let (acc, _) = await Self.makeAccumulator()
+        let outcome = await acc.ingest(Self.url("loose.mp3"), creationDate: Date())
+        #expect(outcome == .emittedSingle)
+    }
+
     @Test
     func stop_flushesBufferedBatchEvenWithoutSettle() async {
         let (acc, sink) = await Self.makeAccumulator()

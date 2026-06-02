@@ -166,6 +166,7 @@
 		EB93CE7149E8874BF383B3B8 /* NotionPageBuilderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE385C18A6EB5FD953A55E6F /* NotionPageBuilderTests.swift */; };
 		EC3C0A026717156DE4F4E405 /* HotkeyRegistrar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3655D3BF86D9C2822621BF58 /* HotkeyRegistrar.swift */; };
 		F3DDE8F0C48071E18289DEF9 /* PipelineIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C6FD0A84281D5E1073A427A /* PipelineIntegrationTests.swift */; };
+		47F4CE45874D962BF648C950 /* ProcessingPipelineStreamingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2F4E8885A0E939A136B2DB2 /* ProcessingPipelineStreamingTests.swift */; };
 		F574E8A5832F44428FDC1834 /* ClaudeCodeValidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E9BE97E28A571CEA9699244 /* ClaudeCodeValidationTests.swift */; };
 		F69CDF53C6F5680FC311A8C9 /* FileOrganizerContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F81143C80A9FC0C13DFB362 /* FileOrganizerContextTests.swift */; };
 		F7E2451C8828519B8047C65E /* SystemSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A6DE1E88DB26D4CEF759D93 /* SystemSection.swift */; };
@@ -227,6 +228,7 @@
 		16F5FB2169CF5FC8AF6C35D4 /* AppSettingsNotionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsNotionTests.swift; sourceTree = "<group>"; };
 		17687F46D7A0781669E5CC9F /* NotionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotionClient.swift; sourceTree = "<group>"; };
 		1C6FD0A84281D5E1073A427A /* PipelineIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipelineIntegrationTests.swift; sourceTree = "<group>"; };
+		F2F4E8885A0E939A136B2DB2 /* ProcessingPipelineStreamingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProcessingPipelineStreamingTests.swift; sourceTree = "<group>"; };
 		1D64B96BCD219453E291C3CE /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		1E486522DE41FE6A2FC00432 /* InMemoryKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InMemoryKeychain.swift; sourceTree = "<group>"; };
 		20D35F1E4B0F180010FC1B95 /* TranscriptionRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionRequest.swift; sourceTree = "<group>"; };
@@ -728,6 +730,7 @@
 				89019A012263DB9A106180B6 /* MeetingFolderTimestampTests.swift */,
 				95F9E11967B48E4D9666D28C /* PipelineCoordinatorTests.swift */,
 				1C6FD0A84281D5E1073A427A /* PipelineIntegrationTests.swift */,
+				F2F4E8885A0E939A136B2DB2 /* ProcessingPipelineStreamingTests.swift */,
 				65DB63A41796DBC1ACE1D01B /* ProcessingPipelineClaudeCodeTests.swift */,
 				DBC06B092EB7E2F6686BF12B /* ProcessingPipelineNotionTests.swift */,
 			);
@@ -1368,6 +1371,7 @@
 				91586B6F48449555EC1AC9CE /* OrganizationValidationTests.swift in Sources */,
 				F84C6723662ED208D8F42C7F /* PipelineCoordinatorTests.swift in Sources */,
 				F3DDE8F0C48071E18289DEF9 /* PipelineIntegrationTests.swift in Sources */,
+				47F4CE45874D962BF648C950 /* ProcessingPipelineStreamingTests.swift in Sources */,
 				3CEDB3A932561910FF9BC046 /* ProcessedFilesLedgerTests.swift in Sources */,
 				AEDA709EABC74F0448A35CFF /* ProcessingPipelineClaudeCodeTests.swift in Sources */,
 				A6A6FC1FBD4EB59B38D0B73E /* ProcessingPipelineNotionTests.swift in Sources */,

@@ -21,7 +21,17 @@ struct CurrentMeetingEditorView: View {
     @State private var draftName: String = ""
     @State private var draftOrgId: UUID? = nil
     @State private var draftContext: String = ""
-    @State private var loaded = false
+
+    /// Identity of the recording whose values are currently loaded into the
+    /// draft fields. `startedAt` is unique per recording, so when a new
+    /// recording begins this no longer matches `pending.startedAt` and the
+    /// draft is reloaded. This window is a singleton `Window` scene whose
+    /// `@State` survives being dismissed and reopened — without keying the
+    /// load on the recording identity (a one-shot `loaded` flag did this
+    /// before), the editor kept showing the *previous* meeting's name/org/
+    /// context, and any edit committed that stale name onto the new active
+    /// recording.
+    @State private var loadedStartedAt: Date?
 
     /// Sentinel for the "No Organization" picker entry. Driven through
     /// `draftOrgId` as a sentinel UUID so the SwiftUI Picker can bind to
@@ -45,6 +55,12 @@ struct CurrentMeetingEditorView: View {
         .frame(minWidth: 420, minHeight: 360)
         .navigationTitle("Current meeting")
         .onAppear(perform: loadDraftIfNeeded)
+        .onChange(of: contextStore.pending?.startedAt) { _, _ in
+            // A new recording (different `startedAt`) replaced the pending
+            // slot while this singleton window was alive — reload so we edit
+            // the active meeting, not the one that was here before.
+            loadDraftIfNeeded()
+        }
         .onChange(of: contextStore.pending == nil) { _, becameNil in
             if becameNil {
                 dismissWindow()
@@ -105,11 +121,16 @@ struct CurrentMeetingEditorView: View {
     // MARK: - Sync helpers
 
     private func loadDraftIfNeeded() {
-        guard !loaded, let snapshot = contextStore.pending?.snapshot else { return }
+        guard let pending = contextStore.pending else { return }
+        // Already showing this recording — don't clobber in-progress edits.
+        // `update(...)` bumps `lastEditedAt` but never `startedAt`, so a
+        // commit from this very editor won't trigger a reload.
+        guard loadedStartedAt != pending.startedAt else { return }
+        let snapshot = pending.snapshot
         draftName = snapshot.meetingName
         draftOrgId = snapshot.organizationId
         draftContext = snapshot.meetingSpecificContext ?? ""
-        loaded = true
+        loadedStartedAt = pending.startedAt
     }
 
     /// Commit changes to the store and recompile the prompt. Each editor

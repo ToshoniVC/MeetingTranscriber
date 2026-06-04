@@ -74,6 +74,13 @@ actor ProcessingPipeline {
     private let transcriptionClient: TranscriptionClient
     private let fileOrganizer: FileOrganizer
 
+    /// Splits an oversized audio file into upload-sized `.m4a` chunks
+    /// before transcription. Stateless and dependency-free (pure
+    /// AVFoundation over the file on disk), so it's a plain stored
+    /// constant rather than an injected collaborator — there's nothing to
+    /// mock, and its planning math is unit-tested directly.
+    private let audioChunker = AudioChunker()
+
     /// Closures that hop to `@MainActor` to update UI state. Injected so the
     /// pipeline doesn't have to know about `AppSettings` or `MenuBarController`
     /// or `AuditLogStore` directly.
@@ -321,12 +328,64 @@ actor ProcessingPipeline {
 
     // MARK: - Transcription dispatch (rotating vs legacy)
 
-    /// Dispatch a transcription. When a `providerSource` is wired this
-    /// walks the configured provider chain via `RotatingTranscriber`
-    /// (v0.4.5+); otherwise it falls back to the single-provider call
-    /// shape backed by the `PipelineConfig` snapshot — preserving the
-    /// pre-0.4.5 behavior used by older test fixtures.
+    /// Dispatch a transcription, transparently splitting an oversized file
+    /// so each upload fits under the endpoint's content-size limit. Files
+    /// within the limit transcribe in a single call (unchanged path).
+    ///
+    /// Oversized files are re-encoded into contiguous `.m4a` chunks,
+    /// transcribed one at a time — with the same inter-part politeness
+    /// delay used between batch parts so the request burst doesn't trip a
+    /// per-minute rate limit — then stitched back into one logical result
+    /// via `TranscriptionResult.merging`, which shifts each chunk's segment
+    /// timestamps so the merged transcript reads as one continuous
+    /// recording. This single insertion point covers every caller: the
+    /// single-file path, each batch part, and streamed parts.
+    ///
+    /// If the file is oversized but can't be split (no audio track,
+    /// indeterminate duration, or a failed export), we fall back to a
+    /// single upload: the endpoint may still accept it, and if not its own
+    /// 413 surfaces the actionable error rather than a chunking failure.
     private func runTranscription(
+        audio: URL,
+        prompt: String?
+    ) async throws -> TranscriptionResult {
+        let chunkSet: AudioChunker.ChunkSet?
+        do {
+            chunkSet = try await audioChunker.chunkIfNeeded(
+                audio,
+                maxBytes: Self.maxUploadBytes,
+                targetBytes: Self.chunkTargetBytes
+            )
+        } catch {
+            Log.pipeline.warning("Chunking skipped for \(audio.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public) — uploading whole.")
+            return try await transcribeOnce(audio: audio, prompt: prompt)
+        }
+
+        guard let chunkSet else {
+            return try await transcribeOnce(audio: audio, prompt: prompt)
+        }
+
+        defer { try? FileManager.default.removeItem(at: chunkSet.directory) }
+        Log.pipeline.info("Split \(audio.lastPathComponent, privacy: .public) into \(chunkSet.urls.count, privacy: .public) chunks to fit the upload limit")
+
+        var chunkResults: [TranscriptionResult] = []
+        chunkResults.reserveCapacity(chunkSet.urls.count)
+        for (index, chunkURL) in chunkSet.urls.enumerated() {
+            if index > 0 {
+                try? await Task.sleep(nanoseconds: Self.interPartDelayNanos)
+            }
+            chunkResults.append(try await transcribeOnce(audio: chunkURL, prompt: prompt))
+        }
+        return TranscriptionResult.merging(chunkResults)
+    }
+
+    /// The provider dispatch itself: walk the configured chain via
+    /// `RotatingTranscriber` (v0.4.5+) when a `providerSource` is wired,
+    /// otherwise the single-provider call backed by the `PipelineConfig`
+    /// snapshot (preserving the pre-0.4.5 behaviour older test fixtures
+    /// rely on). Split out from `runTranscription` so the chunking wrapper
+    /// can call it once per chunk.
+    private func transcribeOnce(
         audio: URL,
         prompt: String?
     ) async throws -> TranscriptionResult {
@@ -865,6 +924,17 @@ actor ProcessingPipeline {
     /// uploads many parts in a row, so the per-minute rate limit on
     /// either provider doesn't pile up. 250 ms = 0.25 s.
     private static let interPartDelayNanos: UInt64 = 250_000_000
+
+    /// Transcription endpoints cap an upload's content size at 25 MiB
+    /// (26_214_400 bytes — the exact limit Groq/OpenAI report in their
+    /// HTTP 413). A file larger than `maxUploadBytes` is split into
+    /// `chunkTargetBytes` pieces before upload; both sit below the hard
+    /// limit to leave room for multipart-body overhead and AAC
+    /// size-estimate drift (a chunk's encoded size is estimated from the
+    /// source's average bytes-per-second, not measured). 24 MiB trigger /
+    /// 15 MiB target.
+    private static let maxUploadBytes = 24 * 1024 * 1024
+    private static let chunkTargetBytes = 15 * 1024 * 1024
 
     private static let timestampFormatter: DateFormatter = {
         let f = DateFormatter()

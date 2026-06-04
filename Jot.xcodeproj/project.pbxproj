@@ -121,6 +121,9 @@
 		AEDA709EABC74F0448A35CFF /* ProcessingPipelineClaudeCodeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65DB63A41796DBC1ACE1D01B /* ProcessingPipelineClaudeCodeTests.swift */; };
 		AFFCB7D2403F9BB2FCDFA15D /* TranscriptionRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20D35F1E4B0F180010FC1B95 /* TranscriptionRequest.swift */; };
 		5F804A4EEB2C8081DC3DAC6E /* TranscriptionResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFCD1E5510574AD716CEF283 /* TranscriptionResult.swift */; };
+		AAAA0000000000000000C001 /* AudioChunker.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAAA0000000000000000C002 /* AudioChunker.swift */; };
+		AAAA0000000000000000C003 /* AudioChunkerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAAA0000000000000000C004 /* AudioChunkerTests.swift */; };
+		AAAA0000000000000000C005 /* AudioChunkerIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAAA0000000000000000C006 /* AudioChunkerIntegrationTests.swift */; };
 		D212CBEC0868890F0FE3EAF4 /* TranscriptionSegmentFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F67287712A75610715DE04B /* TranscriptionSegmentFilter.swift */; };
 		81D946062EE2BC05740DF738 /* TimestampedTranscriptFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAEAE8D7226E7F62AB6D902B /* TimestampedTranscriptFormatter.swift */; };
 		CEEA4840018947691C613736 /* TimestampedTranscriptFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DAD55F621C4A7C70C386694 /* TimestampedTranscriptFormatterTests.swift */; };
@@ -233,6 +236,9 @@
 		1E486522DE41FE6A2FC00432 /* InMemoryKeychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InMemoryKeychain.swift; sourceTree = "<group>"; };
 		20D35F1E4B0F180010FC1B95 /* TranscriptionRequest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionRequest.swift; sourceTree = "<group>"; };
 		EFCD1E5510574AD716CEF283 /* TranscriptionResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionResult.swift; sourceTree = "<group>"; };
+		AAAA0000000000000000C002 /* AudioChunker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioChunker.swift; sourceTree = "<group>"; };
+		AAAA0000000000000000C004 /* AudioChunkerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioChunkerTests.swift; sourceTree = "<group>"; };
+		AAAA0000000000000000C006 /* AudioChunkerIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioChunkerIntegrationTests.swift; sourceTree = "<group>"; };
 		9F67287712A75610715DE04B /* TranscriptionSegmentFilter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionSegmentFilter.swift; sourceTree = "<group>"; };
 		BAEAE8D7226E7F62AB6D902B /* TimestampedTranscriptFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimestampedTranscriptFormatter.swift; sourceTree = "<group>"; };
 		1DAD55F621C4A7C70C386694 /* TimestampedTranscriptFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimestampedTranscriptFormatterTests.swift; sourceTree = "<group>"; };
@@ -640,6 +646,8 @@
 		56CBB7DAD4F34166E616171C /* Transcription */ = {
 			isa = PBXGroup;
 			children = (
+				AAAA0000000000000000C004 /* AudioChunkerTests.swift */,
+				AAAA0000000000000000C006 /* AudioChunkerIntegrationTests.swift */,
 				3B68B09B43D97FA8E788C4E3 /* RotatingTranscriberTests.swift */,
 				1DAD55F621C4A7C70C386694 /* TimestampedTranscriptFormatterTests.swift */,
 				5FDB899C6C4EC86762403B27 /* TranscriptionClientIntegrationTests.swift */,
@@ -983,6 +991,7 @@
 			isa = PBXGroup;
 			children = (
 				0B2024E531F6BBEB821190EE /* .gitkeep */,
+				AAAA0000000000000000C002 /* AudioChunker.swift */,
 				A8D55829CDEB39CD0086948B /* RotatingTranscriber.swift */,
 				BAEAE8D7226E7F62AB6D902B /* TimestampedTranscriptFormatter.swift */,
 				108C06A1DC6694146E00D0C8 /* TranscriptionClient.swift */,
@@ -1298,6 +1307,7 @@
 				A2B747F61B514A47A4B894D1 /* TranscriptionError.swift in Sources */,
 				AFFCB7D2403F9BB2FCDFA15D /* TranscriptionRequest.swift in Sources */,
 				5F804A4EEB2C8081DC3DAC6E /* TranscriptionResult.swift in Sources */,
+				AAAA0000000000000000C001 /* AudioChunker.swift in Sources */,
 				D212CBEC0868890F0FE3EAF4 /* TranscriptionSegmentFilter.swift in Sources */,
 				08F9F939786209ACDA9EC749 /* TranscriptsView.swift in Sources */,
 				E994126055B69EC0E078CD8B /* TranscriptsViewModel.swift in Sources */,
@@ -1393,6 +1403,8 @@
 				1DA10CC9A972277BC5B616F0 /* TranscriptionRequestTests.swift in Sources */,
 				1C2FC0DFFD459206504E6F78 /* TranscriptionResultMergingTests.swift in Sources */,
 				437D1C28755E24FEEE3CF956 /* TranscriptionSegmentFilterTests.swift in Sources */,
+				AAAA0000000000000000C003 /* AudioChunkerTests.swift in Sources */,
+				AAAA0000000000000000C005 /* AudioChunkerIntegrationTests.swift in Sources */,
 				D7B29093D6BCC2A6E8E93B68 /* TranscriptsViewModelTests.swift in Sources */,
 				556D14C3393078ADA868C9CE /* ManualUploadCoordinatorTests.swift in Sources */,
 				F6A74968B223C61B4B7615CC /* ManualUploadStagingServiceTests.swift in Sources */,

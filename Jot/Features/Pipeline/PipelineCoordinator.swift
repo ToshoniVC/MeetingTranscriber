@@ -90,11 +90,13 @@ final class PipelineCoordinator {
         }
     }
 
-    /// User clicked Retry on a failed Audit Log row.
-    func retry(url: URL) async {
-        await pipeline?.retry(url: url)
-        // If the retry succeeds, the pipeline writes a fresh success entry;
-        // we don't pre-emptively dismiss the original failure row.
+    /// User clicked Retry on a failed Audit Log row. The whole entry is
+    /// passed (not just its path) so a multi-part failure can be replayed as
+    /// one batch — the part list + meeting name/context ride on the entry.
+    func retry(entry: AuditLogEntry) async {
+        await pipeline?.retry(entry: entry)
+        // On success the pipeline writes a fresh success entry AND retires
+        // this failure row via the `onRetrySucceeded` callback wired below.
     }
 
     /// Reset the menu-bar icon from `.error(...)` back to a healthy state.
@@ -231,6 +233,11 @@ final class PipelineCoordinator {
                 onAuditEntry: { [weak self] entry in
                     Task { @MainActor in
                         self?.auditLog.append(entry)
+                    }
+                },
+                onRetrySucceeded: { entryId in
+                    Task { @MainActor in
+                        auditLog.markRetried(entryId)
                     }
                 },
                 consumeMeetingContext: consumeMeetingContext,

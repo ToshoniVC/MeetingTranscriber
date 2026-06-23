@@ -47,21 +47,105 @@ struct AuditLogEntryTests {
         #expect(decoded == entries)
     }
 
-    // MARK: - Schema v5 (transcription provider attribution)
+    // MARK: - Schema v6 (batch-aware retry payload)
 
     @Test
-    func newEntry_defaultsToSchemaV5() {
+    func newEntry_defaultsToSchemaV6() {
         let entry = AuditLogEntry(kind: .info, sourcePath: "/a", message: "x")
-        #expect(entry.schemaVersion == 5)
+        #expect(entry.schemaVersion == 6)
         #expect(entry.contextAttached == nil)
         #expect(entry.organizationName == nil)
         #expect(entry.notionStatus == nil)
         #expect(entry.claudeCodeStatus == nil)
         #expect(entry.transcriptionProvider == nil)
+        #expect(entry.batchPartPaths == nil)
+        #expect(entry.retryMeetingName == nil)
+        #expect(entry.retryCompiledContext == nil)
+        #expect(entry.recordingStartedAt == nil)
     }
 
     @Test
-    func roundTrip_preservesAddContextV2Fields_onV5Entry() throws {
+    func roundTrip_preservesBatchRetryPayload() throws {
+        let original = AuditLogEntry(
+            kind: .failure,
+            sourcePath: "/tmp/part1.mp3",
+            message: "All providers failed",
+            retryable: true,
+            contextAttached: true,
+            organizationName: "Acme",
+            batchPartPaths: ["/tmp/part1.mp3", "/tmp/part2.mp3", "/tmp/part3.mp3"],
+            retryMeetingName: "Quarterly Review",
+            retryCompiledContext: "Org: Acme. Attendees: …",
+            recordingStartedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(AuditLogEntry.self, from: data)
+        #expect(decoded == original)
+        #expect(decoded.batchPartPaths?.count == 3)
+        #expect(decoded.retryMeetingName == "Quarterly Review")
+        #expect(decoded.retryCompiledContext == "Org: Acme. Attendees: …")
+        #expect(decoded.recordingStartedAt == Date(timeIntervalSince1970: 1_700_000_000))
+    }
+
+    /// A schema-5 JSON payload (transcriptionProvider but no batch-retry
+    /// fields) decodes cleanly with the batch fields nil — the migration
+    /// contract for logs written before this feature.
+    @Test
+    func decode_legacyV5Payload_leavesBatchFieldsNil() throws {
+        let legacyJSON = """
+        {
+            "id": "55555555-5555-5555-5555-555555555555",
+            "timestamp": 1700000000.0,
+            "kind": "success",
+            "sourcePath": "/tmp/legacy.mp3",
+            "message": "v5 success",
+            "durationMs": 500,
+            "retryable": false,
+            "contextAttached": true,
+            "organizationName": "Acme",
+            "transcriptionProvider": "OpenAI",
+            "schemaVersion": 5
+        }
+        """
+        let decoded = try JSONDecoder().decode(
+            AuditLogEntry.self,
+            from: Data(legacyJSON.utf8)
+        )
+        #expect(decoded.schemaVersion == 5)
+        #expect(decoded.transcriptionProvider == "OpenAI")
+        #expect(decoded.batchPartPaths == nil)
+        #expect(decoded.retryMeetingName == nil)
+        #expect(decoded.retryCompiledContext == nil)
+        #expect(decoded.recordingStartedAt == nil)
+    }
+
+    @Test
+    func withRetryable_preservesAllFields_includingBatchPayload() {
+        let original = AuditLogEntry(
+            kind: .failure,
+            sourcePath: "/tmp/part1.mp3",
+            message: "fail",
+            retryable: true,
+            organizationName: "Acme",
+            transcriptionProvider: "Groq",
+            batchPartPaths: ["/tmp/part1.mp3", "/tmp/part2.mp3"],
+            retryMeetingName: "Standup",
+            retryCompiledContext: "ctx",
+            recordingStartedAt: Date(timeIntervalSince1970: 42)
+        )
+        let retired = original.withRetryable(false)
+        #expect(retired.retryable == false)
+        #expect(retired.id == original.id)
+        #expect(retired.transcriptionProvider == "Groq")
+        #expect(retired.batchPartPaths == original.batchPartPaths)
+        #expect(retired.retryMeetingName == "Standup")
+        #expect(retired.retryCompiledContext == "ctx")
+        #expect(retired.recordingStartedAt == original.recordingStartedAt)
+        #expect(retired.schemaVersion == original.schemaVersion)
+    }
+
+    @Test
+    func roundTrip_preservesAddContextV2Fields_onCurrentSchemaEntry() throws {
         let original = AuditLogEntry(
             kind: .success,
             sourcePath: "/tmp/x.mp3",
@@ -74,7 +158,7 @@ struct AuditLogEntryTests {
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(AuditLogEntry.self, from: data)
         #expect(decoded == original)
-        #expect(decoded.schemaVersion == 5)
+        #expect(decoded.schemaVersion == 6)
         #expect(decoded.contextAttached == true)
         #expect(decoded.organizationName == "Acme")
     }

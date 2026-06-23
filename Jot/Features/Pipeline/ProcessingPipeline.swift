@@ -87,6 +87,14 @@ actor ProcessingPipeline {
     private let onStateChange: @Sendable (PipelineState) -> Void
     private let onAuditEntry: @Sendable (AuditLogEntry) -> Void
 
+    /// Called with the *original* failure entry's id when a user-triggered
+    /// retry of that entry finally succeeds, so the host can flip the row's
+    /// `retryable` flag off (the Retry button disappears) and stop the stale
+    /// entry — which still points at a now-moved source file — from being
+    /// re-fired into a "file missing" loop. Nil for test/headless contexts
+    /// that don't surface a Retry button.
+    private let onRetrySucceeded: (@Sendable (UUID) -> Void)?
+
     /// Optional bridge to `MeetingContextStore`. Given a file's creation
     /// date, returns the full snapshot for the recording Jot kicked off —
     /// but only if that creation date is plausibly inside Jot's recording
@@ -181,6 +189,7 @@ actor ProcessingPipeline {
         fileOrganizer: FileOrganizer = FileOrganizer(),
         onStateChange: @escaping @Sendable (PipelineState) -> Void,
         onAuditEntry: @escaping @Sendable (AuditLogEntry) -> Void,
+        onRetrySucceeded: (@Sendable (UUID) -> Void)? = nil,
         consumeMeetingContext: (@Sendable (Date) async -> MeetingContextSnapshot?)? = nil,
         pendingRecordingStartedAt: (@Sendable () async -> Date?)? = nil,
         batchAccumulator: MeetingBatchAccumulator? = nil,
@@ -197,6 +206,7 @@ actor ProcessingPipeline {
         self.fileOrganizer = fileOrganizer
         self.onStateChange = onStateChange
         self.onAuditEntry = onAuditEntry
+        self.onRetrySucceeded = onRetrySucceeded
         self.consumeMeetingContext = consumeMeetingContext
         self.pendingRecordingStartedAt = pendingRecordingStartedAt
         self.batchAccumulator = batchAccumulator
@@ -318,12 +328,53 @@ actor ProcessingPipeline {
         }
     }
 
-    /// Re-process a file the user clicked Retry on. The file is still in the
-    /// Watch Folder (Pipeline only moves successful runs out), so we just
-    /// call into `process(url:)` directly.
-    func retry(url: URL) async {
+    /// Re-process a failed Audit Log entry the user clicked Retry on. The
+    /// source files are still in the Watch Folder (the pipeline only moves
+    /// successful runs out), so we re-run them in place.
+    ///
+    /// A **multi-part** (Audio Hijack split) failure carries the whole part
+    /// list + the meeting name/context on its entry (see `recordFailure`'s
+    /// `batchInfo`), so we rebuild the `MeetingBatch` and replay the entire
+    /// meeting as one unit — one merged transcript, one folder, one Notion
+    /// page. Before this, retry called `process(url:)` on only the first
+    /// part, stranding the rest and losing the meeting name.
+    ///
+    /// A **single-file** failure (no batch payload) takes the existing
+    /// `process(url:)` path unchanged.
+    ///
+    /// Either way we thread the original entry's id through, so a successful
+    /// retry retires that failure row (`onRetrySucceeded`).
+    func retry(entry: AuditLogEntry) async {
         guard running else { return }
-        await process(url: url)
+        if let batch = Self.reconstructBatch(from: entry) {
+            await processBatch(batch, originalEntryId: entry.id)
+        } else {
+            await process(url: URL(fileURLWithPath: entry.sourcePath), originalEntryId: entry.id)
+        }
+    }
+
+    /// Rebuild a `MeetingBatch` from a failed multi-part entry's persisted
+    /// payload, or `nil` when the entry isn't a batch failure (so retry
+    /// falls back to the single-file path). The reconstructed snapshot
+    /// carries only what the batch path actually consumes — meeting name,
+    /// organization name, and the compiled prompt — which is enough to
+    /// re-rename, re-file, and re-publish identically to the original run.
+    nonisolated static func reconstructBatch(from entry: AuditLogEntry) -> MeetingBatch? {
+        guard let paths = entry.batchPartPaths, !paths.isEmpty else { return nil }
+        let parts = paths.map { URL(fileURLWithPath: $0) }
+        let snapshot = MeetingContextSnapshot(
+            meetingName: entry.retryMeetingName
+                ?? parts[0].deletingPathExtension().lastPathComponent,
+            organizationName: entry.organizationName,
+            resolvedCompiledContext: entry.retryCompiledContext ?? ""
+        )
+        let started = entry.recordingStartedAt ?? entry.timestamp
+        return MeetingBatch(
+            snapshot: snapshot,
+            startedAt: started,
+            stoppedAt: started,
+            parts: parts
+        )
     }
 
     // MARK: - Transcription dispatch (rotating vs legacy)
@@ -407,7 +458,7 @@ actor ProcessingPipeline {
 
     // MARK: - Per-file processing
 
-    private func process(url: URL) async {
+    private func process(url: URL, originalEntryId: UUID? = nil) async {
         let startTime = Date()
         onStateChange(.processing(url))
 
@@ -500,6 +551,11 @@ actor ProcessingPipeline {
             ))
             onStateChange(.idle)
 
+            // 4b. If this run was a user retry, retire the original failure
+            // row so its Retry button disappears and the stale source path
+            // stops being re-fired.
+            if let originalEntryId { onRetrySucceeded?(originalEntryId) }
+
             // 5. Fire the Notion write as a background task on success
             // *only* in `.attempt` mode. The main pipeline returns to
             // idle immediately — Notion never blocks the success path.
@@ -553,7 +609,7 @@ actor ProcessingPipeline {
     /// On failure of any part's transcription or the organize step, the
     /// whole batch is recorded as one failure row referencing the first
     /// part — the other parts stay in the Watch Folder for retry.
-    private func processBatch(_ batch: MeetingBatch) async {
+    private func processBatch(_ batch: MeetingBatch, originalEntryId: UUID? = nil) async {
         let startTime = Date()
         let snapshot = batch.snapshot
         guard let firstPart = batch.parts.first else {
@@ -585,6 +641,38 @@ actor ProcessingPipeline {
             for part in batch.parts {
                 streamingTranscriptions.removeValue(forKey: part)?.cancel()
             }
+        }
+
+        // Batch info stamped onto any failure so the Retry button can replay
+        // the whole meeting (all parts + the same name/context), not just the
+        // first part. Computed up-front so every failure path shares it.
+        let batchInfo = BatchRetryInfo(
+            parts: resolvedParts,
+            meetingName: snapshot.meetingName,
+            compiledContext: prompt,
+            recordingStartedAt: batch.startedAt
+        )
+
+        // Fail fast (and clearly) if any part is missing after relocation —
+        // e.g., a part was already filed by an earlier, pre-fix single-file
+        // retry. Transcribing the survivors would just produce a second
+        // fragment, so we don't: we surface one actionable failure and leave
+        // the batch retryable. The full set can be recovered via Manual Upload.
+        let missing = resolvedParts.filter {
+            !FileManager.default.fileExists(atPath: $0.path(percentEncoded: false))
+        }
+        if !missing.isEmpty {
+            let names = missing.map(\.lastPathComponent).joined(separator: ", ")
+            recordFailure(
+                url: resolvedParts.first ?? firstPart,
+                message: "\(missing.count) of \(resolvedParts.count) recording part(s) missing (\(names)). They may already have been filed — re-add the full set via Manual Upload to rebuild this meeting.",
+                startedAt: startTime,
+                snapshot: snapshot,
+                promptIncluded: prompt != nil,
+                batchInfo: batchInfo
+            )
+            await clearPendingMeetingContext?()
+            return
         }
 
         do {
@@ -675,6 +763,10 @@ actor ProcessingPipeline {
             ))
             onStateChange(.idle)
 
+            // 6b. If this run was a user retry, retire the original failure
+            // row so its Retry button disappears.
+            if let originalEntryId { onRetrySucceeded?(originalEntryId) }
+
             // 7. One Notion write for the whole meeting. Same
             // timestamped rendering as the single-file path; same
             // provider-attribution footer.
@@ -691,15 +783,15 @@ actor ProcessingPipeline {
             }
 
         } catch let error as TranscriptionError {
-            recordFailure(url: firstPart, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
+            recordFailure(url: firstPart, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil, batchInfo: batchInfo)
         } catch let error as RotatingTranscriber.RotationError {
-            recordFailure(url: firstPart, message: error.errorDescription ?? "All providers failed.", startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
+            recordFailure(url: firstPart, message: error.errorDescription ?? "All providers failed.", startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil, batchInfo: batchInfo)
         } catch let error as FileOrganizerError {
-            recordFailure(url: firstPart, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
+            recordFailure(url: firstPart, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil, batchInfo: batchInfo)
         } catch is CancellationError {
             return
         } catch {
-            recordFailure(url: firstPart, message: error.localizedDescription, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
+            recordFailure(url: firstPart, message: error.localizedDescription, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil, batchInfo: batchInfo)
         }
 
         // The accumulator's snapshot has done its job. Tell the store to
@@ -966,12 +1058,25 @@ actor ProcessingPipeline {
         return parent.appendingPathComponent("\(baseName)-\(UUID().uuidString.prefix(8))\(extSuffix)")
     }
 
+    /// The fields a batch failure carries on its audit entry so the Retry
+    /// button can replay the whole meeting rather than re-running only the
+    /// first part. Nil `batchInfo` on `recordFailure` means a single-file
+    /// failure — the entry's batch fields stay nil and retry takes the
+    /// existing per-file path.
+    struct BatchRetryInfo: Sendable {
+        let parts: [URL]
+        let meetingName: String
+        let compiledContext: String?
+        let recordingStartedAt: Date
+    }
+
     private func recordFailure(
         url: URL,
         message: String,
         startedAt: Date,
         snapshot: MeetingContextSnapshot? = nil,
-        promptIncluded: Bool = false
+        promptIncluded: Bool = false,
+        batchInfo: BatchRetryInfo? = nil
     ) {
         let ms = Int(Date().timeIntervalSince(startedAt) * 1000)
         onAuditEntry(.init(
@@ -981,7 +1086,11 @@ actor ProcessingPipeline {
             durationMs: ms,
             retryable: true,
             contextAttached: promptIncluded,
-            organizationName: snapshot?.organizationName
+            organizationName: snapshot?.organizationName,
+            batchPartPaths: batchInfo?.parts.map { $0.path(percentEncoded: false) },
+            retryMeetingName: batchInfo?.meetingName,
+            retryCompiledContext: batchInfo?.compiledContext,
+            recordingStartedAt: batchInfo?.recordingStartedAt
         ))
         // PRD §4.3: failed files must stay in the Watch Folder. We don't
         // touch the source on failure — `FileOrganizer` only moves on

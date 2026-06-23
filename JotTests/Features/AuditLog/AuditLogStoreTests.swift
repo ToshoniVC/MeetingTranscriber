@@ -87,6 +87,33 @@ struct AuditLogStoreTests {
     }
 
     @Test
+    func markRetried_preservesBatchRetryPayload() {
+        let url = Self.tempFileURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let store = AuditLogStore(fileURL: url)
+        let entry = AuditLogEntry(
+            id: UUID(), kind: .failure,
+            sourcePath: "/tmp/part1.mp3", message: "All providers failed",
+            retryable: true,
+            organizationName: "Acme",
+            transcriptionProvider: "Groq",
+            batchPartPaths: ["/tmp/part1.mp3", "/tmp/part2.mp3"],
+            retryMeetingName: "Standup",
+            retryCompiledContext: "ctx"
+        )
+        store.append(entry)
+        store.markRetried(entry.id)
+        let retired = store.entries.first
+        #expect(retired?.retryable == false)
+        // Retiring the row must not drop the batch payload, provider, or org.
+        #expect(retired?.batchPartPaths == ["/tmp/part1.mp3", "/tmp/part2.mp3"])
+        #expect(retired?.retryMeetingName == "Standup")
+        #expect(retired?.retryCompiledContext == "ctx")
+        #expect(retired?.transcriptionProvider == "Groq")
+        #expect(retired?.organizationName == "Acme")
+    }
+
+    @Test
     func markRetried_unknownID_isNoOp() {
         let url = Self.tempFileURL()
         defer { try? FileManager.default.removeItem(at: url) }

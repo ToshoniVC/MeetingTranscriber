@@ -3,12 +3,37 @@
     <channel>
         <title>Jot</title>
         <item>
-            <title>0.7.0</title>
-            <pubDate>Thu, 04 Jun 2026 16:29:56 +0000</pubDate>
-            <sparkle:version>118</sparkle:version>
-            <sparkle:shortVersionString>0.7.0</sparkle:shortVersionString>
+            <title>0.7.1</title>
+            <pubDate>Tue, 23 Jun 2026 12:36:53 +0000</pubDate>
+            <sparkle:version>125</sparkle:version>
+            <sparkle:shortVersionString>0.7.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/ToshoniVC/MeetingTranscriber/releases/download/v0.7.0/Jot-0.7.0.zip" length="2744089" type="application/octet-stream" sparkle:edSignature="/mi8XAvcdAoihQ0w1reXaYptIw+j9U2ZJOYyrV/0v4RDOr1QvHaiCWxAhbi0+IkVFOwbQ5RxOnvTWeaTP6rQBA=="/>
+            <description><![CDATA[<!--
+  Sparkle release notes for v0.7.1, shown in the in-app "Update available"
+  dialog. generate_appcast (release.yml) embeds this file as the appcast
+  item's <description> because its name matches the archive (Jot-0.7.1.zip
+  -> Jot-0.7.1.html). Keep it user-facing and short; the long-form
+  engineering log lives in the commit history.
+-->
+<h2>Jot 0.7.1</h2>
+<p>Fixes how Jot recovers a meeting that failed to transcribe.</p>
+<ul>
+  <li><strong>Retry rebuilds the whole meeting.</strong> When a recording
+      that Audio Hijack split into several parts fails (say a provider was
+      down or out of credits), pressing <em>Retry</em> now re-transcribes
+      every part and files them as one transcript, one folder, and one
+      Notion page. Previously only the first part was retried and the rest
+      were left behind in the Watch Folder.</li>
+  <li><strong>The Retry button clears itself.</strong> Once a retry
+      succeeds, its failure row stops offering Retry, so it can no longer
+      re-fire against an audio file that has already been moved.</li>
+  <li><strong>Clearer "missing part" message.</strong> If a part is gone
+      when you retry, Jot now says so plainly and points you to Manual
+      Upload to rebuild the meeting, instead of failing with a cryptic
+      "file not found".</li>
+</ul>
+]]></description>
+            <enclosure url="https://github.com/ToshoniVC/MeetingTranscriber/releases/download/v0.7.1/Jot-0.7.1.zip" length="2769714" type="application/octet-stream" sparkle:edSignature="aLKCi6f442bMLrLXkfmIQ3WwFw6VZt34+bgZZZ/kCFgFlFMBq0+VJxEXGKcXjuhf5Vh7zAKLNxLZ6sqo431qAg=="/>
         </item>
     </channel>
 </rss>

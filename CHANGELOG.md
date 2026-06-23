@@ -5,6 +5,83 @@ Versions are tagged from `main` (`v0.1.0`, `v0.1.1`, …) and built/signed by
 release notes from the `<description>` element in `docs/appcast.xml`, not
 this file — this is the long-form humans-only log.
 
+## v0.7.1 — Batch-aware retry for failed recordings
+
+Retrying a meeting that failed to transcribe used to re-run only the
+first part of a split recording — stranding the rest in the Watch Folder
+and losing the meeting name — and the Retry button never cleared, so it
+re-fired against an audio file the partial retry had already moved.
+
+- **Retry replays the whole meeting.** A failed multi-part (Audio Hijack
+  split) recording now carries its full part list plus the meeting
+  name/context on the audit entry, so Retry rebuilds the batch and
+  re-transcribes every part into one transcript, one folder, and one
+  Notion page.
+- **The Retry button retires itself** once a retry succeeds
+  (`AuditLogStore.markRetried`, previously dead code, is now wired through
+  a new `onRetrySucceeded` pipeline callback).
+- **Clearer "missing part" failure.** If a part has gone missing at retry
+  time, the pipeline fails fast and points to Manual Upload to rebuild the
+  meeting, instead of a cryptic "file not found" — and never produces a
+  second partial transcript.
+- **Appcast + GitHub release notes.** `release.yml` now embeds
+  `release-notes/Jot-<version>.html` as both the Sparkle update
+  description and the GitHub Release body. (`AuditLogEntry` schema
+  v5 → v6; older logs migrate cleanly.)
+
+_The entries below from v0.4.2 to v0.7.0 were reconstructed from the git
+tags and merged PRs when this log was revived at v0.7.1, so they are
+terser than the hand-written milestone notes around them._
+
+## v0.7.0 — Chunked upload for oversized audio
+
+- Split an oversized audio file into upload-sized chunks before
+  transcription so it clears the provider's ~25 MB upload limit (#34).
+- Fix the current-meeting editor showing the previous meeting's draft.
+
+## v0.6.0 — Streaming transcription
+
+Transcribe each Audio Hijack part as soon as it finalizes *during*
+recording and buffer the result, so after Stop only the final part has
+to upload — the full transcript lands shortly after the meeting ends,
+not minutes later (#33).
+
+## v0.5.6 — Editable context + transcript output filtering
+
+Editable per-meeting context configuration, plus filtering of Whisper
+output artifacts (hallucinated boilerplate) out of the transcript (#32).
+
+## v0.5.0–v0.5.5 — Manual Upload
+
+A file picker that routes manually-chosen recordings through the existing
+pipeline, refined across several patch releases:
+
+- **v0.5.0** — pick and stage `.mp3` / `.mp4` files into the pipeline.
+- **v0.5.1** — multi-file selection → one combined meeting; fix a
+  re-upload ledger path collision (#27).
+- **v0.5.2** — surface the server error body on failure; add a 250 ms
+  inter-part throttle to ease per-minute rate limits (#28).
+- **v0.5.3** — accept `.m4a` and `.wav` in the picker (#29).
+- **v0.5.4** — auto-normalize MP3 uploads to m4a/AAC so split-part
+  metadata doesn't trip the endpoint (#30).
+- **v0.5.5** — sort selected parts by Audio Hijack part number rather
+  than alphabetically (#31).
+
+## v0.4.2–v0.4.7 — Pipeline & provider hardening
+
+- **v0.4.2** — request `verbose_json` from the transcription endpoint to
+  expose the truncation gap (#20).
+- **v0.4.3** — stop `MeetingBatchAccumulator.flushNow` from cancelling its
+  own settle task, which surfaced as spurious "Network error: cancelled"
+  on first recordings (#21).
+- **v0.4.4** — persist the verbose JSON transcript on disk and send a
+  timestamped body to Notion (#22).
+- **v0.4.5** — configure multiple transcription providers with an ordered
+  fallback chain (#23).
+- **v0.4.6** — reorder sidebar tabs: Context third, Settings last (#24).
+- **v0.4.7** — relocate the audio file when Audio Hijack renames it
+  post-stop, instead of failing with file-not-found (#25).
+
 ## v0.4.1 — Recording starts on hotkey press
 
 Removes the friction where the recording hotkey opened a modal prompt

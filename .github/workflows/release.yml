@@ -175,10 +175,24 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release create "${{ steps.vars.outputs.tag }}" \
-            "${{ steps.zip.outputs.name }}" \
-            --title "Jot ${{ steps.vars.outputs.version }}" \
-            --notes "Jot ${{ steps.vars.outputs.version }} — see CHANGELOG and the README for install instructions."
+          # Use the same per-version notes that drive the Sparkle appcast
+          # <description> (release-notes/Jot-<version>.html) as the GitHub
+          # Release body, so both surfaces show identical "what's new" text.
+          # GitHub renders the whitelisted HTML tags (h2/p/ul/li/strong/em).
+          # Falls back to a generic line when the notes file is absent.
+          NOTES_SRC="release-notes/Jot-${{ steps.vars.outputs.version }}.html"
+          if [ -f "$NOTES_SRC" ]; then
+            gh release create "${{ steps.vars.outputs.tag }}" \
+              "${{ steps.zip.outputs.name }}" \
+              --title "Jot ${{ steps.vars.outputs.version }}" \
+              --notes-file "$NOTES_SRC"
+          else
+            echo "::warning::No release notes at $NOTES_SRC — using generic GitHub Release body."
+            gh release create "${{ steps.vars.outputs.tag }}" \
+              "${{ steps.zip.outputs.name }}" \
+              --title "Jot ${{ steps.vars.outputs.version }}" \
+              --notes "Jot ${{ steps.vars.outputs.version }} — see CHANGELOG.md and the README for install instructions."
+          fi
 
       # Regenerate docs/appcast.xml. `generate_appcast` reads the public
       # GitHub releases and the file we just zipped to produce a fresh feed.

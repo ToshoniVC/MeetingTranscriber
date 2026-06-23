@@ -321,8 +321,10 @@ struct PipelineIntegrationTests {
         // File still there.
         #expect(FileManager.default.fileExists(atPath: audio.path(percentEncoded: false)))
 
-        // User clicks Retry.
-        await pipeline.retry(url: audio)
+        // User clicks Retry on the failure row (single-file failure → no
+        // batch payload, so retry takes the per-file path).
+        let failureEntry = try #require(capture.entries.first { $0.kind == .failure })
+        await pipeline.retry(entry: failureEntry)
 
         // Wait for the success entry.
         let gotSuccess = await Self.waitForCondition {

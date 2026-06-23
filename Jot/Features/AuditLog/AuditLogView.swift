@@ -45,7 +45,7 @@ struct AuditLogView: View {
                     AuditLogRow(
                         entry: entry,
                         onRetry: {
-                            Task { await pipeline.retry(url: URL(fileURLWithPath: entry.sourcePath)) }
+                            Task { await pipeline.retry(entry: entry) }
                         },
                         onShowDetails: entry.kind == .failure
                             ? { inspector.show(from: entry) }

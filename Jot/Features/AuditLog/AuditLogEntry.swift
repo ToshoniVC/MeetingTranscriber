@@ -3,6 +3,12 @@ import Foundation
 /// One row in the Audit Log tab (PRD §3.2 Tab 2). Codable so the
 /// `AuditLogStore` can persist the whole log to disk and survive relaunches.
 ///
+/// **Schema v6** (batch-aware retry): adds `batchPartPaths`,
+/// `retryMeetingName`, `retryCompiledContext`, and `recordingStartedAt`
+/// so a failed multi-part (Audio Hijack split) recording can be replayed
+/// as one batch by the Retry button instead of re-running only the first
+/// part as a lone single-file meeting. All Optional → legacy rows decode
+/// cleanly.
 /// **Schema v5** (Multiple Providers feature): adds
 /// `transcriptionProvider`.
 /// **Schema v4** (Claude Code Meeting Notes feature): adds
@@ -62,10 +68,34 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
     /// (which doesn't know its own provider name). v0.4.5+.
     let transcriptionProvider: String?
 
-    /// On-disk schema version. Bumped from 4 → 5 for
-    /// `transcriptionProvider`. New entries default to the current
-    /// value; legacy rows decode as 1 (pre-Add-Context) when the field
-    /// is absent.
+    /// When this failure represents a multi-part (Audio Hijack split)
+    /// recording, the part file paths in chronological order. Lets the
+    /// Retry button replay the whole meeting as one batch instead of
+    /// re-running only the first part as a lone single-file meeting.
+    /// `nil` for single-file failures and every non-failure row. v0.7.1
+    /// (schema v6).
+    let batchPartPaths: [String]?
+
+    /// Meeting name captured at batch time, replayed on retry. The live
+    /// `MeetingContextStore` snapshot is cleared once a batch finishes
+    /// (even on failure), so without this a batch retry would lose the
+    /// user's meeting name and fall back to the raw filename. `nil`
+    /// outside batch failures.
+    let retryMeetingName: String?
+
+    /// The compiled Whisper prompt captured at batch time, replayed
+    /// verbatim on retry. `nil` when no context was attached or outside
+    /// batch failures.
+    let retryCompiledContext: String?
+
+    /// The recording's start time, used as the relocation anchor when a
+    /// part was renamed/moved by Audio Hijack between the original run
+    /// and a retry. `nil` outside batch failures.
+    let recordingStartedAt: Date?
+
+    /// On-disk schema version. Bumped from 5 → 6 for the batch-retry
+    /// fields. New entries default to the current value; legacy rows
+    /// decode as 1 (pre-Add-Context) when the field is absent.
     let schemaVersion: Int
 
     init(
@@ -81,7 +111,11 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         notionStatus: NotionStatus? = nil,
         claudeCodeStatus: ClaudeCodeRoutineStatus? = nil,
         transcriptionProvider: String? = nil,
-        schemaVersion: Int = 5
+        batchPartPaths: [String]? = nil,
+        retryMeetingName: String? = nil,
+        retryCompiledContext: String? = nil,
+        recordingStartedAt: Date? = nil,
+        schemaVersion: Int = 6
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -95,6 +129,10 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         self.notionStatus = notionStatus
         self.claudeCodeStatus = claudeCodeStatus
         self.transcriptionProvider = transcriptionProvider
+        self.batchPartPaths = batchPartPaths
+        self.retryMeetingName = retryMeetingName
+        self.retryCompiledContext = retryCompiledContext
+        self.recordingStartedAt = recordingStartedAt
         self.schemaVersion = schemaVersion
     }
 
@@ -115,6 +153,10 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         self.notionStatus = try c.decodeIfPresent(NotionStatus.self, forKey: .notionStatus)
         self.claudeCodeStatus = try c.decodeIfPresent(ClaudeCodeRoutineStatus.self, forKey: .claudeCodeStatus)
         self.transcriptionProvider = try c.decodeIfPresent(String.self, forKey: .transcriptionProvider)
+        self.batchPartPaths = try c.decodeIfPresent([String].self, forKey: .batchPartPaths)
+        self.retryMeetingName = try c.decodeIfPresent(String.self, forKey: .retryMeetingName)
+        self.retryCompiledContext = try c.decodeIfPresent(String.self, forKey: .retryCompiledContext)
+        self.recordingStartedAt = try c.decodeIfPresent(Date.self, forKey: .recordingStartedAt)
         self.schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
     }
 
@@ -135,6 +177,10 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
             notionStatus: status,
             claudeCodeStatus: claudeCodeStatus,
             transcriptionProvider: transcriptionProvider,
+            batchPartPaths: batchPartPaths,
+            retryMeetingName: retryMeetingName,
+            retryCompiledContext: retryCompiledContext,
+            recordingStartedAt: recordingStartedAt,
             schemaVersion: schemaVersion
         )
     }
@@ -156,6 +202,36 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
             notionStatus: notionStatus,
             claudeCodeStatus: status,
             transcriptionProvider: transcriptionProvider,
+            batchPartPaths: batchPartPaths,
+            retryMeetingName: retryMeetingName,
+            retryCompiledContext: retryCompiledContext,
+            recordingStartedAt: recordingStartedAt,
+            schemaVersion: schemaVersion
+        )
+    }
+
+    /// Return a copy of this entry with `retryable` replaced. Backs
+    /// `AuditLogStore.markRetried(...)` — preserves every other field,
+    /// including the batch-retry payload and schema version, so retiring
+    /// a row never silently drops data.
+    func withRetryable(_ retryable: Bool) -> AuditLogEntry {
+        AuditLogEntry(
+            id: id,
+            timestamp: timestamp,
+            kind: kind,
+            sourcePath: sourcePath,
+            message: message,
+            durationMs: durationMs,
+            retryable: retryable,
+            contextAttached: contextAttached,
+            organizationName: organizationName,
+            notionStatus: notionStatus,
+            claudeCodeStatus: claudeCodeStatus,
+            transcriptionProvider: transcriptionProvider,
+            batchPartPaths: batchPartPaths,
+            retryMeetingName: retryMeetingName,
+            retryCompiledContext: retryCompiledContext,
+            recordingStartedAt: recordingStartedAt,
             schemaVersion: schemaVersion
         )
     }

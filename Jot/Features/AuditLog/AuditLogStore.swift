@@ -61,20 +61,7 @@ final class AuditLogStore {
     /// the Pipeline when a retry succeeds, so the Retry button disappears.
     func markRetried(_ id: UUID) {
         guard let idx = entries.firstIndex(where: { $0.id == id }) else { return }
-        let original = entries[idx]
-        entries[idx] = AuditLogEntry(
-            id: original.id,
-            timestamp: original.timestamp,
-            kind: original.kind,
-            sourcePath: original.sourcePath,
-            message: original.message,
-            durationMs: original.durationMs,
-            retryable: false,
-            contextAttached: original.contextAttached,
-            organizationName: original.organizationName,
-            notionStatus: original.notionStatus,
-            claudeCodeStatus: original.claudeCodeStatus
-        )
+        entries[idx] = entries[idx].withRetryable(false)
         persist()
     }
 

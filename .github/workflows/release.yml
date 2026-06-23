@@ -196,6 +196,20 @@ jobs:
 
           mkdir -p appcast-build
           cp "${{ steps.zip.outputs.name }}" appcast-build/
+
+          # Release notes: generate_appcast embeds an item <description> when
+          # it finds an HTML file named like the archive (minus .zip) next to
+          # it. Ship per-version notes from release-notes/Jot-<version>.html.
+          # Guarded so a missing file degrades to the pre-0.7.1 behavior
+          # (item with no <description>) instead of failing the release.
+          NOTES_SRC="release-notes/Jot-${{ steps.vars.outputs.version }}.html"
+          if [ -f "$NOTES_SRC" ]; then
+            cp "$NOTES_SRC" "appcast-build/Jot-${{ steps.vars.outputs.version }}.html"
+            echo "Embedding release notes from $NOTES_SRC"
+          else
+            echo "::warning::No release notes at $NOTES_SRC — appcast will omit <description>."
+          fi
+
           # --download-url-prefix tells Sparkle where each release zip lives.
           # We're hosting on GitHub Releases, so the URL is the GH release
           # download URL — generate_appcast inserts the filename after the

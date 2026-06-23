@@ -1,0 +1,24 @@
+<!--
+  Sparkle release notes for v0.7.1, shown in the in-app "Update available"
+  dialog. generate_appcast (release.yml) embeds this file as the appcast
+  item's <description> because its name matches the archive (Jot-0.7.1.zip
+  -> Jot-0.7.1.html). Keep it user-facing and short; the long-form
+  engineering log lives in the commit history.
+-->
+<h2>Jot 0.7.1</h2>
+<p>Fixes how Jot recovers a meeting that failed to transcribe.</p>
+<ul>
+  <li><strong>Retry rebuilds the whole meeting.</strong> When a recording
+      that Audio Hijack split into several parts fails (say a provider was
+      down or out of credits), pressing <em>Retry</em> now re-transcribes
+      every part and files them as one transcript, one folder, and one
+      Notion page. Previously only the first part was retried and the rest
+      were left behind in the Watch Folder.</li>
+  <li><strong>The Retry button clears itself.</strong> Once a retry
+      succeeds, its failure row stops offering Retry, so it can no longer
+      re-fire against an audio file that has already been moved.</li>
+  <li><strong>Clearer "missing part" message.</strong> If a part is gone
+      when you retry, Jot now says so plainly and points you to Manual
+      Upload to rebuild the meeting, instead of failing with a cryptic
+      "file not found".</li>
+</ul>

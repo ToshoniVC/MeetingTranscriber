@@ -49,7 +49,9 @@ struct AuditLogView: View {
                         },
                         onShowDetails: entry.kind == .failure
                             ? { inspector.show(from: entry) }
-                            : nil
+                            : nil,
+                        onRetryNotion: retryNotionAction(for: entry),
+                        onShowNotionDetails: notionDetailsAction(for: entry)
                     )
                     .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                 }
@@ -57,5 +59,30 @@ struct AuditLogView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// True when this row's Notion write ended in `.failed` — the only
+    /// state that gets the Details + Retry Notion affordances.
+    private func isNotionFailed(_ entry: AuditLogEntry) -> Bool {
+        if case .failed = entry.notionStatus { return true }
+        return false
+    }
+
+    /// Replay-just-Notion action for a row, or nil when its Notion write
+    /// didn't fail or the row predates the on-disk retry payload (legacy
+    /// entries with no `meetingFolderPath` can't be replayed, so they get
+    /// Details only — no dead button). The explicit `(() -> Void)?` return
+    /// type gives the closure a known shape so `Task { … }` resolves
+    /// unambiguously.
+    private func retryNotionAction(for entry: AuditLogEntry) -> (() -> Void)? {
+        guard isNotionFailed(entry), entry.meetingFolderPath != nil else { return nil }
+        return { Task { await pipeline.retryNotion(entry: entry) } }
+    }
+
+    /// Show-Notion-error action for a row, or nil when its Notion write
+    /// didn't fail.
+    private func notionDetailsAction(for entry: AuditLogEntry) -> (() -> Void)? {
+        guard isNotionFailed(entry) else { return nil }
+        return { inspector.show(notionFailureFrom: entry) }
     }
 }

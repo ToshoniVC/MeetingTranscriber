@@ -68,6 +68,20 @@ final class ErrorInspector {
         )
     }
 
+    /// Present the inspector for a *Notion* failure on an otherwise-
+    /// successful row. The row's own `message` describes the transcription
+    /// success, so we pull the failure text out of `notionStatus` instead.
+    /// No-op when the entry's Notion status isn't `.failed`.
+    func show(notionFailureFrom entry: AuditLogEntry) {
+        guard case .failed(let message)? = entry.notionStatus else { return }
+        currentError = ErrorDetails(
+            title: "Notion write failed",
+            message: message,
+            sourcePath: entry.sourcePath,
+            timestamp: entry.timestamp
+        )
+    }
+
     /// Present the inspector from the menu-bar dropdown while the icon is
     /// in `.error` state. No-op for any other state — that lets the caller
     /// pass `menuBar.iconState` unconditionally without branching.

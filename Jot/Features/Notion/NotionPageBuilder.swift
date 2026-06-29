@@ -177,45 +177,62 @@ enum NotionPageBuilder {
         }
     }
 
-    /// Split `text` into chunks of ≤`maxChars` characters, preferring a
-    /// trailing whitespace boundary inside each chunk. Falls back to a
-    /// hard cut at `maxChars` if no whitespace is found in the window.
-    /// Returns an empty array for empty input (caller handles the
-    /// "empty paragraph" case).
+    /// Split `text` into chunks whose UTF-16 length is ≤`maxChars`, preferring
+    /// a trailing whitespace boundary inside each chunk. Falls back to a hard
+    /// cut at the budget if no whitespace is found in the window. Returns an
+    /// empty array for empty input (caller handles the "empty paragraph" case).
+    ///
+    /// **Why UTF-16, not `String.count`:** Notion validates
+    /// `rich_text[].text.content.length` in UTF-16 code units (its API is a JS
+    /// backend, where `String.length` counts code units). Swift's `count`
+    /// measures grapheme clusters, so a chunk of ≤2000 graphemes containing
+    /// emoji or other non-BMP characters can exceed 2000 UTF-16 units and get
+    /// rejected with a 400. We therefore budget in UTF-16 units while still
+    /// splitting only on grapheme boundaries — an emoji is never cut in half.
     static func chunked(_ text: String, maxChars: Int) -> [String] {
         guard !text.isEmpty else { return [] }
 
         var result: [String] = []
-        var remaining = Substring(text)
+        var current = ""
+        var currentUTF16 = 0
+        // The index, within `current`, just past the last whitespace we saw.
+        // A nil value means "no whitespace seen yet in this chunk."
+        var lastBreak: String.Index?
 
-        while !remaining.isEmpty {
-            if remaining.count <= maxChars {
-                result.append(String(remaining))
-                break
-            }
-
-            let hardEnd = remaining.index(remaining.startIndex, offsetBy: maxChars)
-            // Walk backwards from hardEnd to find a whitespace split point.
-            // Don't go past the first 50% of the window — for content with
-            // no whitespace (e.g., a giant hex blob) we'd rather hard-cut
-            // than emit a tiny chunk.
-            let minSplit = remaining.index(remaining.startIndex, offsetBy: maxChars / 2)
-            var split = hardEnd
-            var walker = remaining.index(before: hardEnd)
-            while walker > minSplit {
-                if remaining[walker].isWhitespace {
-                    split = remaining.index(after: walker)
-                    break
-                }
-                walker = remaining.index(before: walker)
-            }
-
-            let chunk = remaining[remaining.startIndex..<split]
-            result.append(String(chunk).trimmingCharacters(in: .whitespacesAndNewlines))
-            remaining = remaining[split...]
+        func flush(_ chunk: String) {
+            let trimmed = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { result.append(trimmed) }
         }
 
-        // Drop any pure-whitespace trailing chunks the trim left behind.
-        return result.filter { !$0.isEmpty }
+        for character in text {
+            let charUTF16 = character.utf16.count
+
+            // A single grapheme cluster can itself exceed the budget (rare —
+            // e.g. a long ZWJ emoji sequence). Emit whatever we have, then let
+            // the oversized cluster occupy its own chunk; Notion's limit is far
+            // larger than any real grapheme so this is a theoretical safety net.
+            if currentUTF16 + charUTF16 > maxChars, !current.isEmpty {
+                // Prefer to break at the last whitespace boundary so we don't
+                // split mid-word; fall back to a hard cut at the budget edge.
+                if let lastBreak, lastBreak > current.startIndex {
+                    flush(String(current[current.startIndex..<lastBreak]))
+                    current = String(current[lastBreak...])
+                } else {
+                    flush(current)
+                    current = ""
+                }
+                currentUTF16 = current.utf16.count
+                lastBreak = nil
+            }
+
+            current.append(character)
+            currentUTF16 += charUTF16
+            if character.isWhitespace {
+                lastBreak = current.endIndex
+            }
+        }
+
+        flush(current)
+        return result
     }
 }

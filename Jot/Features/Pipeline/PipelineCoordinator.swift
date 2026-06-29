@@ -99,6 +99,15 @@ final class PipelineCoordinator {
         // this failure row via the `onRetrySucceeded` callback wired below.
     }
 
+    /// User clicked "Retry Notion" on a success row whose Notion write
+    /// failed. Replays only the page write from the on-disk transcript —
+    /// no re-transcription — updating this same row's `notionStatus` in
+    /// place via the `onNotionStatusChange` callback. Requires a running
+    /// pipeline (the Notion writer + Output-folder access live there).
+    func retryNotion(entry: AuditLogEntry) async {
+        await pipeline?.retryNotion(entry: entry)
+    }
+
     /// Reset the menu-bar icon from `.error(...)` back to a healthy state.
     /// Called from the Audit Log's Clear Log button and from a dedicated
     /// "Dismiss error" menu item — both ways the user can explicitly say

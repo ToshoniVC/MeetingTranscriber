@@ -380,4 +380,52 @@ struct NotionPageBuilderTests {
         #expect(json.contains("\"object\":\"block\""))
         #expect(json.contains("\"type\":\"toggle\""))
     }
+
+    // MARK: - UTF-16 budget (regression: Notion counts code units, not graphemes)
+
+    /// Notion validates `content.length` in UTF-16 code units, but Swift's
+    /// `String.count` measures grapheme clusters. A transcript of emoji (each
+    /// one grapheme but two UTF-16 units) used to produce chunks that Swift
+    /// thought were ≤2000 yet Notion rejected at ~2052. Pin that every emitted
+    /// paragraph stays within the budget *in UTF-16 units*, and that no emoji
+    /// grapheme is split across a chunk boundary.
+    @Test
+    func emojiTranscript_keepsEveryParagraphWithinUTF16Budget() {
+        // 💃 (U+1F483) is one grapheme = two UTF-16 units. Space-separated so
+        // the chunker has word boundaries, mirroring a real transcript.
+        let transcript = Array(repeating: "💃", count: 1_500).joined(separator: " ")
+        // Swift would have measured this well under the multi-chunk threshold
+        // per chunk, but UTF-16 length is ~2x — the bug we're guarding against.
+        #expect(transcript.utf16.count > NotionPageBuilder.maxRichTextContentChars)
+
+        let result = NotionPageBuilder.build(
+            databaseId: dbId,
+            titlePropertyName: titleProp,
+            meetingName: "x",
+            transcript: transcript,
+            additionalContext: ""
+        )
+        guard case .toggle(_, let children) = result.createPage.children[1] else {
+            Issue.record("Transcript section was not a toggle")
+            return
+        }
+
+        var recombined = ""
+        for block in children {
+            guard case .paragraph(let runs) = block else { continue }
+            for run in runs {
+                // The actual fix: every chunk fits Notion's UTF-16 limit.
+                #expect(run.text.content.utf16.count <= NotionPageBuilder.maxRichTextContentChars)
+                // No emoji was cut in half — each grapheme is intact, so an
+                // even UTF-16 count of dancers and no stray replacement chars.
+                #expect(!run.text.content.unicodeScalars.contains { $0.value == 0xFFFD })
+                recombined += run.text.content
+            }
+        }
+
+        // Every dancer survives the round-trip (whitespace is trimmed at joins).
+        let originalDancers = transcript.filter { $0 == "💃" }.count
+        let recombinedDancers = recombined.filter { $0 == "💃" }.count
+        #expect(recombinedDancers == originalDancers)
+    }
 }

@@ -3,6 +3,12 @@ import Foundation
 /// One row in the Audit Log tab (PRD §3.2 Tab 2). Codable so the
 /// `AuditLogStore` can persist the whole log to disk and survive relaunches.
 ///
+/// **Schema v7** (Notion-only retry): adds `meetingFolderPath` and starts
+/// populating `retryMeetingName` / `retryCompiledContext` on *success*
+/// rows too. Together they let the Audit Log replay just the Notion write
+/// from the already-transcribed meeting on disk — no re-transcription —
+/// when the page creation failed but transcription succeeded. All Optional
+/// → legacy rows decode cleanly.
 /// **Schema v6** (batch-aware retry): adds `batchPartPaths`,
 /// `retryMeetingName`, `retryCompiledContext`, and `recordingStartedAt`
 /// so a failed multi-part (Audio Hijack split) recording can be replayed
@@ -93,9 +99,16 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
     /// and a retry. `nil` outside batch failures.
     let recordingStartedAt: Date?
 
-    /// On-disk schema version. Bumped from 5 → 6 for the batch-retry
-    /// fields. New entries default to the current value; legacy rows
-    /// decode as 1 (pre-Add-Context) when the field is absent.
+    /// Filesystem path of the meeting's output folder (the per-meeting
+    /// directory holding the `.txt` / `.json` transcripts). Stamped on
+    /// success rows so a Notion-only retry can re-read the transcript from
+    /// disk and replay the page creation without re-transcribing. `nil` on
+    /// failure rows, on non-pipeline rows, and on v1–v6-schema rows. v7.
+    let meetingFolderPath: String?
+
+    /// On-disk schema version. Bumped from 6 → 7 for `meetingFolderPath`.
+    /// New entries default to the current value; legacy rows decode as 1
+    /// (pre-Add-Context) when the field is absent.
     let schemaVersion: Int
 
     init(
@@ -115,7 +128,8 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         retryMeetingName: String? = nil,
         retryCompiledContext: String? = nil,
         recordingStartedAt: Date? = nil,
-        schemaVersion: Int = 6
+        meetingFolderPath: String? = nil,
+        schemaVersion: Int = 7
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -133,6 +147,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         self.retryMeetingName = retryMeetingName
         self.retryCompiledContext = retryCompiledContext
         self.recordingStartedAt = recordingStartedAt
+        self.meetingFolderPath = meetingFolderPath
         self.schemaVersion = schemaVersion
     }
 
@@ -157,6 +172,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         self.retryMeetingName = try c.decodeIfPresent(String.self, forKey: .retryMeetingName)
         self.retryCompiledContext = try c.decodeIfPresent(String.self, forKey: .retryCompiledContext)
         self.recordingStartedAt = try c.decodeIfPresent(Date.self, forKey: .recordingStartedAt)
+        self.meetingFolderPath = try c.decodeIfPresent(String.self, forKey: .meetingFolderPath)
         self.schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
     }
 
@@ -181,6 +197,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
             retryMeetingName: retryMeetingName,
             retryCompiledContext: retryCompiledContext,
             recordingStartedAt: recordingStartedAt,
+            meetingFolderPath: meetingFolderPath,
             schemaVersion: schemaVersion
         )
     }
@@ -206,6 +223,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
             retryMeetingName: retryMeetingName,
             retryCompiledContext: retryCompiledContext,
             recordingStartedAt: recordingStartedAt,
+            meetingFolderPath: meetingFolderPath,
             schemaVersion: schemaVersion
         )
     }
@@ -232,6 +250,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
             retryMeetingName: retryMeetingName,
             retryCompiledContext: retryCompiledContext,
             recordingStartedAt: recordingStartedAt,
+            meetingFolderPath: meetingFolderPath,
             schemaVersion: schemaVersion
         )
     }

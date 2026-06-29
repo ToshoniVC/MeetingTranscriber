@@ -353,6 +353,73 @@ actor ProcessingPipeline {
         }
     }
 
+    /// Replay *only* the Notion page write for a meeting whose transcription
+    /// already succeeded but whose Notion write failed (or was skipped
+    /// because Notion wasn't ready at the time). Reads the transcript back
+    /// from the meeting folder on disk — no re-transcription — and reuses
+    /// the same `scheduleNotionWrite` path, so a successful retry also fires
+    /// the post-Notion Claude Code routine exactly like a first-time write.
+    ///
+    /// On any precondition miss the row is flipped back to `.failed` with a
+    /// message the user can read, rather than failing silently. The retried
+    /// page carries the plain transcript (plus the provider footer): the
+    /// original timestamped rendering isn't persisted in that exact form, and
+    /// a page with the transcript beats no page at all.
+    func retryNotion(entry: AuditLogEntry) async {
+        guard running else { return }
+        guard case .attempt(let config, let writer) = notionMode else {
+            onNotionStatusChange?(entry.id, .failed(
+                message: "Notion isn't configured — enable it in Settings, then retry."))
+            return
+        }
+        guard let folderPath = entry.meetingFolderPath else {
+            onNotionStatusChange?(entry.id, .failed(
+                message: "Can't retry — this meeting predates Notion retry support."))
+            return
+        }
+        guard var transcript = Self.readTranscript(inMeetingFolder: folderPath) else {
+            onNotionStatusChange?(entry.id, .failed(
+                message: "Couldn't read the transcript back from the meeting folder."))
+            return
+        }
+        if let provider = entry.transcriptionProvider, !provider.isEmpty {
+            transcript += "\n\n— Transcribed by \(provider)"
+        }
+        let meetingName = entry.retryMeetingName
+            ?? URL(fileURLWithPath: folderPath).lastPathComponent
+        let additionalContext = entry.retryCompiledContext ?? ""
+
+        // Flip the row to pending so the UI shows the in-flight spinner,
+        // then reuse the standard write path (which reports success/failure
+        // and fires the Claude Code routine on success).
+        onNotionStatusChange?(entry.id, .pending)
+        scheduleNotionWrite(
+            entryId: entry.id,
+            config: config,
+            writer: writer,
+            meetingName: meetingName,
+            transcript: transcript,
+            additionalContext: additionalContext
+        )
+    }
+
+    /// Read the plain-text transcript (`.txt`) back from a meeting folder for
+    /// a Notion-only retry. Returns the file contents, or `nil` when the
+    /// folder is gone or holds no `.txt`. Security-scoped access to the
+    /// Output Folder is held by `PipelineCoordinator` for the pipeline's
+    /// lifetime, so this read needs no scope juggling of its own.
+    nonisolated static func readTranscript(inMeetingFolder folderPath: String) -> String? {
+        let folder = URL(fileURLWithPath: folderPath)
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: folder,
+            includingPropertiesForKeys: nil
+        ) else { return nil }
+        guard let txt = contents.first(where: { $0.pathExtension.lowercased() == "txt" }) else {
+            return nil
+        }
+        return try? String(contentsOf: txt, encoding: .utf8)
+    }
+
     /// Rebuild a `MeetingBatch` from a failed multi-part entry's persisted
     /// payload, or `nil` when the entry isn't a batch failure (so retry
     /// falls back to the single-file path). The reconstructed snapshot
@@ -536,6 +603,12 @@ actor ProcessingPipeline {
             let message = providerLabel.map {
                 "Transcribed via \($0) → \(meetingFolder.lastPathComponent)"
             } ?? "Transcribed and filed → \(meetingFolder.lastPathComponent)"
+            // Capture the meeting name, compiled context, and output-folder
+            // path so a Notion-only retry can replay the page write from the
+            // already-transcribed meeting on disk (schema v7). Mirrors the
+            // values handed to `scheduleNotionWrite` just below.
+            let retryMeetingName = snapshot?.meetingName
+                ?? workingURL.deletingPathExtension().lastPathComponent
             onAuditEntry(.init(
                 id: entryId,
                 kind: .success,
@@ -547,7 +620,10 @@ actor ProcessingPipeline {
                 organizationName: snapshot?.organizationName,
                 notionStatus: initialStatus,
                 claudeCodeStatus: initialClaudeCodeStatus,
-                transcriptionProvider: providerLabel
+                transcriptionProvider: providerLabel,
+                retryMeetingName: retryMeetingName,
+                retryCompiledContext: snapshot?.resolvedCompiledContext,
+                meetingFolderPath: meetingFolder.path(percentEncoded: false)
             ))
             onStateChange(.idle)
 
@@ -563,9 +639,9 @@ actor ProcessingPipeline {
                 // Source the meeting name + additional context from the
                 // recording snapshot when we have one; fall back to the
                 // audio basename + empty context for files that arrived
-                // outside a Jot-kicked session.
-                let meetingName = snapshot?.meetingName
-                    ?? workingURL.deletingPathExtension().lastPathComponent
+                // outside a Jot-kicked session. `retryMeetingName` already
+                // resolved the same fallback above.
+                let meetingName = retryMeetingName
                 let additionalContext = snapshot?.resolvedCompiledContext ?? ""
                 // Send Notion the timestamped rendering so the meeting
                 // page reads like minutes with jump-back anchors, not
@@ -759,7 +835,13 @@ actor ProcessingPipeline {
                 organizationName: snapshot.organizationName,
                 notionStatus: initialStatus,
                 claudeCodeStatus: initialClaudeCodeStatus,
-                transcriptionProvider: providerLabel
+                transcriptionProvider: providerLabel,
+                // Notion-only retry payload (schema v7) — same inputs handed
+                // to `scheduleNotionWrite` below, so a failed page write can
+                // be replayed from the on-disk transcript without re-running.
+                retryMeetingName: snapshot.meetingName,
+                retryCompiledContext: snapshot.resolvedCompiledContext,
+                meetingFolderPath: meetingFolder.path(percentEncoded: false)
             ))
             onStateChange(.idle)
 

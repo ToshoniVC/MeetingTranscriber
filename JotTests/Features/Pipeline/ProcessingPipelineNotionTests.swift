@@ -231,6 +231,132 @@ struct ProcessingPipelineNotionTests {
         }
     }
 
+    // MARK: - Notion-only retry
+
+    /// After a Notion write fails on an otherwise-successful meeting, the
+    /// row carries the meeting-folder path, so `retryNotion(entry:)` can
+    /// re-read the transcript from disk and replay just the page write —
+    /// no re-transcription — flipping the status back to `.succeeded`.
+    @Test
+    @MainActor
+    func retryNotion_afterFailure_replaysWriteFromDisk_andSucceeds() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        MockURLProtocol.responder = { _ in Self.okResponse(body: "retry me") }
+
+        let (watch, output, ledger) = try Self.makeFolders()
+        defer {
+            try? FileManager.default.removeItem(at: watch)
+            try? FileManager.default.removeItem(at: output)
+        }
+
+        let writer = FakeNotionMeetingWriter()
+        writer.nextResult = .failure(.serverError(status: 503))
+
+        let capture = Capture()
+        let pipeline = try await Self.makePipeline(
+            watch: watch, output: output, ledger: ledger,
+            session: MockURLSession.make(),
+            capture: capture,
+            notionMode: .attempt(config: Self.notionConfig, writer: writer)
+        )
+        try await pipeline.start()
+        defer { Task { await pipeline.stop() } }
+
+        _ = try Self.writeAudio("gamma.mp3", to: watch)
+
+        // First pass: the write fails, leaving a success row with a
+        // `.failed` Notion status and a populated meeting-folder path.
+        let failed = await Self.waitForCondition {
+            capture.notionUpdates.contains {
+                if case .failed = $0.1 { return true }
+                return false
+            }
+        }
+        #expect(failed)
+
+        let successEntry = try #require(capture.entries.first { $0.kind == .success })
+        let folderPath = try #require(successEntry.meetingFolderPath)
+        #expect(FileManager.default.fileExists(atPath: folderPath))
+        #expect(writer.calls.count == 1)
+
+        // Now the write would succeed; replay only the Notion step.
+        let notionPageURL = URL(string: "https://www.notion.so/Retried-feedface")!
+        writer.nextResult = .success(NotionPageResult(pageId: "p2", url: notionPageURL))
+        await pipeline.retryNotion(entry: successEntry)
+
+        let resucceeded = await Self.waitForCondition {
+            capture.notionUpdates.contains {
+                if case .succeeded = $0.1 { return true }
+                return false
+            }
+        }
+        #expect(resucceeded)
+
+        // The retry hit the writer a second time, scoped to the same row,
+        // and sent the plain transcript read back from the `.txt` on disk
+        // (no timestamps — that rendering isn't persisted). No snapshot was
+        // wired, so the meeting name is the audio basename.
+        #expect(writer.calls.count == 2)
+        let retryCall = try #require(writer.calls.last)
+        #expect(retryCall.transcript == "retry me")
+        #expect(retryCall.meetingName == "gamma")
+
+        let succeededUpdate = try #require(capture.notionUpdates.last {
+            if case .succeeded = $0.1 { return true }
+            return false
+        })
+        #expect(succeededUpdate.0 == successEntry.id)
+    }
+
+    /// Retry is a no-op-with-feedback when Notion isn't configured: the row
+    /// flips to `.failed` with an explanatory message and the writer is
+    /// never touched.
+    @Test
+    @MainActor
+    func retryNotion_whenNotionNotConfigured_reportsFailureWithoutCallingWriter() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        MockURLProtocol.responder = { _ in Self.okResponse(body: "body") }
+
+        let (watch, output, ledger) = try Self.makeFolders()
+        defer {
+            try? FileManager.default.removeItem(at: watch)
+            try? FileManager.default.removeItem(at: output)
+        }
+
+        let capture = Capture()
+        // No notionMode → the pipeline has no writer to retry with.
+        let pipeline = try await Self.makePipeline(
+            watch: watch, output: output, ledger: ledger,
+            session: MockURLSession.make(),
+            capture: capture,
+            notionMode: nil
+        )
+        try await pipeline.start()
+        defer { Task { await pipeline.stop() } }
+
+        let entry = AuditLogEntry(
+            kind: .success,
+            sourcePath: "/tmp/x.mp3",
+            message: "Transcribed",
+            notionStatus: .failed(message: "boom"),
+            meetingFolderPath: output.path(percentEncoded: false)
+        )
+        await pipeline.retryNotion(entry: entry)
+
+        let reported = await Self.waitForCondition {
+            capture.notionUpdates.contains { $0.0 == entry.id }
+        }
+        #expect(reported)
+        let update = try #require(capture.notionUpdates.last { $0.0 == entry.id })
+        if case .failed(let message) = update.1 {
+            #expect(message.contains("Settings"))
+        } else {
+            Issue.record("Expected .failed, got \(update.1)")
+        }
+    }
+
     // MARK: - .skip
 
     @Test

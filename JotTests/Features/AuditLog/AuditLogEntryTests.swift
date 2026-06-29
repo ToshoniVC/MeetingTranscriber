@@ -47,12 +47,12 @@ struct AuditLogEntryTests {
         #expect(decoded == entries)
     }
 
-    // MARK: - Schema v6 (batch-aware retry payload)
+    // MARK: - Schema v7 (Notion-only retry payload)
 
     @Test
-    func newEntry_defaultsToSchemaV6() {
+    func newEntry_defaultsToCurrentSchema() {
         let entry = AuditLogEntry(kind: .info, sourcePath: "/a", message: "x")
-        #expect(entry.schemaVersion == 6)
+        #expect(entry.schemaVersion == 7)
         #expect(entry.contextAttached == nil)
         #expect(entry.organizationName == nil)
         #expect(entry.notionStatus == nil)
@@ -62,6 +62,63 @@ struct AuditLogEntryTests {
         #expect(entry.retryMeetingName == nil)
         #expect(entry.retryCompiledContext == nil)
         #expect(entry.recordingStartedAt == nil)
+        #expect(entry.meetingFolderPath == nil)
+    }
+
+    @Test
+    func roundTrip_preservesMeetingFolderPath() throws {
+        let original = AuditLogEntry(
+            kind: .success,
+            sourcePath: "/tmp/x.mp3",
+            message: "Transcribed",
+            notionStatus: .failed(message: "HTTP 400"),
+            retryMeetingName: "Weekly Sync",
+            retryCompiledContext: "Org: Acme",
+            meetingFolderPath: "/Output/Weekly Sync"
+        )
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(AuditLogEntry.self, from: data)
+        #expect(decoded == original)
+        #expect(decoded.meetingFolderPath == "/Output/Weekly Sync")
+        #expect(decoded.retryMeetingName == "Weekly Sync")
+    }
+
+    /// A schema-6 JSON payload (batch-retry fields but no `meetingFolderPath`)
+    /// decodes cleanly with the new field nil — the migration contract for
+    /// logs written before Notion-only retry.
+    @Test
+    func decode_legacyV6Payload_leavesMeetingFolderPathNil() throws {
+        let legacyJSON = """
+        {
+            "id": "66666666-6666-6666-6666-666666666666",
+            "timestamp": 1700000000.0,
+            "kind": "success",
+            "sourcePath": "/tmp/legacy.mp3",
+            "message": "v6 success",
+            "retryable": false,
+            "schemaVersion": 6
+        }
+        """
+        let decoded = try JSONDecoder().decode(
+            AuditLogEntry.self,
+            from: Data(legacyJSON.utf8)
+        )
+        #expect(decoded.schemaVersion == 6)
+        #expect(decoded.meetingFolderPath == nil)
+    }
+
+    @Test
+    func withNotionStatus_preservesMeetingFolderPath() {
+        let original = AuditLogEntry(
+            kind: .success,
+            sourcePath: "/tmp/x.mp3",
+            message: "ok",
+            notionStatus: .pending,
+            meetingFolderPath: "/Output/Meeting"
+        )
+        let updated = original.withNotionStatus(.failed(message: "boom"))
+        #expect(updated.meetingFolderPath == "/Output/Meeting")
+        #expect(updated.notionStatus == .failed(message: "boom"))
     }
 
     @Test
@@ -158,7 +215,7 @@ struct AuditLogEntryTests {
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(AuditLogEntry.self, from: data)
         #expect(decoded == original)
-        #expect(decoded.schemaVersion == 6)
+        #expect(decoded.schemaVersion == 7)
         #expect(decoded.contextAttached == true)
         #expect(decoded.organizationName == "Acme")
     }

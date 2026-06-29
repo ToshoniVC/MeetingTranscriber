@@ -11,6 +11,12 @@ struct AuditLogRow: View {
     /// Optional — only populated for failure rows. When set, a "Details"
     /// button surfaces the error inspector modal with this entry.
     let onShowDetails: (() -> Void)?
+    /// Optional — populated on success rows whose Notion write failed.
+    /// Replays just the Notion page write from the on-disk transcript.
+    var onRetryNotion: (() -> Void)? = nil
+    /// Optional — populated on success rows whose Notion write failed.
+    /// Surfaces the Notion error message in the inspector modal.
+    var onShowNotionDetails: (() -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -58,6 +64,21 @@ struct AuditLogRow: View {
             if entry.kind == .failure, let onShowDetails {
                 Button("Details") { onShowDetails() }
                     .controlSize(.small)
+            }
+
+            // Notion-only failure on a success row: the transcription
+            // worked, so this row isn't `.failure` and has no Retry — give
+            // it its own Details (the error text) + a Notion-only retry that
+            // replays just the page write from the saved transcript.
+            if case .failed = entry.notionStatus {
+                if let onShowNotionDetails {
+                    Button("Details") { onShowNotionDetails() }
+                        .controlSize(.small)
+                }
+                if let onRetryNotion {
+                    Button("Retry Notion") { onRetryNotion() }
+                        .controlSize(.small)
+                }
             }
 
             if entry.retryable {

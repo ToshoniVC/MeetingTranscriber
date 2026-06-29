@@ -3,37 +3,37 @@
     <channel>
         <title>Jot</title>
         <item>
-            <title>0.7.1</title>
-            <pubDate>Tue, 23 Jun 2026 12:36:53 +0000</pubDate>
-            <sparkle:version>125</sparkle:version>
-            <sparkle:shortVersionString>0.7.1</sparkle:shortVersionString>
+            <title>0.7.2</title>
+            <pubDate>Mon, 29 Jun 2026 17:01:12 +0000</pubDate>
+            <sparkle:version>128</sparkle:version>
+            <sparkle:shortVersionString>0.7.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <description><![CDATA[<!--
-  Sparkle release notes for v0.7.1, shown in the in-app "Update available"
+  Sparkle release notes for v0.7.2, shown in the in-app "Update available"
   dialog. generate_appcast (release.yml) embeds this file as the appcast
-  item's <description> because its name matches the archive (Jot-0.7.1.zip
-  -> Jot-0.7.1.html). Keep it user-facing and short; the long-form
+  item's <description> because its name matches the archive (Jot-0.7.2.zip
+  -> Jot-0.7.2.html). Keep it user-facing and short; the long-form
   engineering log lives in the commit history.
 -->
-<h2>Jot 0.7.1</h2>
-<p>Fixes how Jot recovers a meeting that failed to transcribe.</p>
+<h2>Jot 0.7.2</h2>
+<p>Fixes Notion pages failing to create, and makes a failed Notion write
+   recoverable.</p>
 <ul>
-  <li><strong>Retry rebuilds the whole meeting.</strong> When a recording
-      that Audio Hijack split into several parts fails (say a provider was
-      down or out of credits), pressing <em>Retry</em> now re-transcribes
-      every part and files them as one transcript, one folder, and one
-      Notion page. Previously only the first part was retried and the rest
-      were left behind in the Watch Folder.</li>
-  <li><strong>The Retry button clears itself.</strong> Once a retry
-      succeeds, its failure row stops offering Retry, so it can no longer
-      re-fire against an audio file that has already been moved.</li>
-  <li><strong>Clearer "missing part" message.</strong> If a part is gone
-      when you retry, Jot now says so plainly and points you to Manual
-      Upload to rebuild the meeting, instead of failing with a cryptic
-      "file not found".</li>
+  <li><strong>Transcripts with emoji no longer break the Notion write.</strong>
+      Jot was measuring transcript length differently from Notion, so a
+      transcript containing emoji could be rejected with a bare
+      <em>"Notion: failed"</em> and no page created. Jot now splits the
+      transcript the way Notion counts it, so the page is created cleanly.</li>
+  <li><strong>See why a Notion write failed.</strong> A failed Notion row
+      now has a <em>Details</em> button that shows the exact error, instead
+      of hiding it in a hover tooltip.</li>
+  <li><strong>Retry just the Notion page.</strong> When transcription
+      succeeded but the Notion write failed, a new <em>Retry Notion</em>
+      button re-creates the page from the transcript already on disk — no
+      need to re-transcribe the whole meeting.</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/ToshoniVC/MeetingTranscriber/releases/download/v0.7.1/Jot-0.7.1.zip" length="2769714" type="application/octet-stream" sparkle:edSignature="aLKCi6f442bMLrLXkfmIQ3WwFw6VZt34+bgZZZ/kCFgFlFMBq0+VJxEXGKcXjuhf5Vh7zAKLNxLZ6sqo431qAg=="/>
+            <enclosure url="https://github.com/ToshoniVC/MeetingTranscriber/releases/download/v0.7.2/Jot-0.7.2.zip" length="2778887" type="application/octet-stream" sparkle:edSignature="oIPjkz7mmtYZprhjb0gwZ4R6l175U91Jsw0YhZZBReb9Dm5oqn1OYiex9csYabzVzx6dZiqNi85KmGHmmFVvAA=="/>
         </item>
     </channel>
 </rss>

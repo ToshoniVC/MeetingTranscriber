@@ -5,6 +5,29 @@ Versions are tagged from `main` (`v0.1.0`, `v0.1.1`, …) and built/signed by
 release notes from the `<description>` element in `docs/appcast.xml`, not
 this file — this is the long-form humans-only log.
 
+## v0.7.2 — Reliable Notion writes + Notion-only retry
+
+A transcript containing emoji could fail the Notion page write outright,
+and the error was both unreadable and unrecoverable from the Audit Log.
+
+- **Fixed the 2000-character rejection.** Notion validates a rich-text
+  block's `content.length` in UTF-16 code units, but the page builder
+  chunked the transcript by grapheme cluster (`String.count`). A
+  transcript with emoji (each one grapheme but two UTF-16 units) produced
+  a paragraph that Jot measured as <=2000 yet Notion rejected at 2052,
+  failing the whole write with a bare "Notion: failed". The builder now
+  budgets each chunk in UTF-16 units while splitting only on grapheme
+  boundaries, so emoji are never cut and every block fits the limit.
+- **The failure is now readable.** A success row whose Notion write failed
+  gets a **Details** button that opens the full error message (previously
+  it was only a hover tooltip).
+- **Notion-only retry.** Success rows record their meeting-folder path
+  (`AuditLogEntry` schema v6 -> v7), so a new **Retry Notion** button
+  replays just the page write from the on-disk transcript -- no
+  re-transcription. A successful retry also fires the Claude Code routine,
+  exactly like a first-time write. Older log rows (which lack the stored
+  path) show Details only.
+
 ## v0.7.1 — Batch-aware retry for failed recordings
 
 Retrying a meeting that failed to transcribe used to re-run only the

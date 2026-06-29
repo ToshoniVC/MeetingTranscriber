@@ -1,0 +1,24 @@
+<!--
+  Sparkle release notes for v0.7.2, shown in the in-app "Update available"
+  dialog. generate_appcast (release.yml) embeds this file as the appcast
+  item's <description> because its name matches the archive (Jot-0.7.2.zip
+  -> Jot-0.7.2.html). Keep it user-facing and short; the long-form
+  engineering log lives in the commit history.
+-->
+<h2>Jot 0.7.2</h2>
+<p>Fixes Notion pages failing to create, and makes a failed Notion write
+   recoverable.</p>
+<ul>
+  <li><strong>Transcripts with emoji no longer break the Notion write.</strong>
+      Jot was measuring transcript length differently from Notion, so a
+      transcript containing emoji could be rejected with a bare
+      <em>"Notion: failed"</em> and no page created. Jot now splits the
+      transcript the way Notion counts it, so the page is created cleanly.</li>
+  <li><strong>See why a Notion write failed.</strong> A failed Notion row
+      now has a <em>Details</em> button that shows the exact error, instead
+      of hiding it in a hover tooltip.</li>
+  <li><strong>Retry just the Notion page.</strong> When transcription
+      succeeded but the Notion write failed, a new <em>Retry Notion</em>
+      button re-creates the page from the transcript already on disk — no
+      need to re-transcribe the whole meeting.</li>
+</ul>

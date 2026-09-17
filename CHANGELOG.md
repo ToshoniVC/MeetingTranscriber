@@ -5,6 +5,36 @@ Versions are tagged from `main` (`v0.1.0`, `v0.1.1`, …) and built/signed by
 release notes from the `<description>` element in `docs/appcast.xml`, not
 this file — this is the long-form humans-only log.
 
+## v0.7.3 — Uploads no longer stall on HTTP/3
+
+Every transcription upload failed on both providers after the Mac moved
+to macOS 27 ("The network connection was lost" / "Request timed out"),
+while small requests such as the Notion connection test kept working.
+
+- **Root cause.** URLSession now reaches the Cloudflare-fronted Groq and
+  OpenAI endpoints over HTTP/3 (QUIC) from the very first request. Its
+  QUIC layer sizes packets from the interface MTU (1500) rather than the
+  IPv6 link MTU the router advertises (1488 on the affected network), the
+  kernel rejects every full-size packet with `EMSGSIZE`, and the stack
+  loops in "blackhole detection" until the peer resets the connection —
+  thousands of `Message too long` lines per upload in Console. Only
+  requests that send full-size packets (audio uploads, long Notion
+  bodies) are affected, which is why the failure looked like both
+  providers going down at once.
+- **Fix.** Jot's HTTP clients (transcription, Notion, Claude Code) now
+  share a session with HTTP/3 switched off (`HTTPSessionPolicy` in
+  `Core/Networking`), so uploads go over HTTP/2 on TCP — verified
+  against api.groq.com on the affected network: a 5 MB upload completed in
+  ~1 s where the HTTP/3 path died after 15 s. There is no public
+  URLSession API for this (ephemeral sessions and `assumesHTTP3Capable`
+  don't help); the opt-out uses the runtime's `_allowsHTTP3` property,
+  guarded so an OS that removes it falls back to today's behaviour rather
+  than crashing.
+- **Diagnostics.** Each request logs the negotiated protocol (`h2`
+  expected) under the new `network` / per-feature log categories and warns
+  if `h3` is negotiated despite the opt-out, so a regression shows up in
+  Console.app immediately.
+
 ## v0.7.2 — Reliable Notion writes + Notion-only retry
 
 A transcript containing emoji could fail the Notion page write outright,

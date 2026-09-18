@@ -3,37 +3,39 @@
     <channel>
         <title>Jot</title>
         <item>
-            <title>0.7.2</title>
-            <pubDate>Mon, 29 Jun 2026 17:01:12 +0000</pubDate>
-            <sparkle:version>128</sparkle:version>
-            <sparkle:shortVersionString>0.7.2</sparkle:shortVersionString>
+            <title>0.7.3</title>
+            <pubDate>Fri, 18 Sep 2026 07:50:02 +0000</pubDate>
+            <sparkle:version>132</sparkle:version>
+            <sparkle:shortVersionString>0.7.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <description><![CDATA[<!--
-  Sparkle release notes for v0.7.2, shown in the in-app "Update available"
+  Sparkle release notes for v0.7.3, shown in the in-app "Update available"
   dialog. generate_appcast (release.yml) embeds this file as the appcast
-  item's <description> because its name matches the archive (Jot-0.7.2.zip
-  -> Jot-0.7.2.html). Keep it user-facing and short; the long-form
-  engineering log lives in the commit history.
+  item's <description> because its name matches the archive (Jot-0.7.3.zip
+  -> Jot-0.7.3.html). Keep it user-facing and short; the long-form
+  engineering log lives in CHANGELOG.md and the commit history.
 -->
-<h2>Jot 0.7.2</h2>
-<p>Fixes Notion pages failing to create, and makes a failed Notion write
-   recoverable.</p>
+<h2>Jot 0.7.3</h2>
+<p>Fixes every transcription failing with <em>"The network connection was
+   lost"</em> or <em>"Request timed out"</em> on macOS 27 — on both
+   providers at once.</p>
 <ul>
-  <li><strong>Transcripts with emoji no longer break the Notion write.</strong>
-      Jot was measuring transcript length differently from Notion, so a
-      transcript containing emoji could be rejected with a bare
-      <em>"Notion: failed"</em> and no page created. Jot now splits the
-      transcript the way Notion counts it, so the page is created cleanly.</li>
-  <li><strong>See why a Notion write failed.</strong> A failed Notion row
-      now has a <em>Details</em> button that shows the exact error, instead
-      of hiding it in a hover tooltip.</li>
-  <li><strong>Retry just the Notion page.</strong> When transcription
-      succeeded but the Notion write failed, a new <em>Retry Notion</em>
-      button re-creates the page from the transcript already on disk — no
-      need to re-transcribe the whole meeting.</li>
+  <li><strong>Uploads no longer stall on HTTP/3.</strong> macOS 27 started
+      sending Jot's audio uploads over HTTP/3 (QUIC). On a network whose
+      router advertises an IPv6 link MTU below 1500, the system's QUIC
+      stack never recovers from the resulting "Message too long" errors, so
+      every part of every meeting failed on Groq and OpenAI alike. Jot now
+      keeps its transcription, Notion and Claude Code requests on HTTP/2
+      over TCP, where the same upload completes in about a second.</li>
+  <li><strong>The protocol shows in Console.</strong> Each upload logs the
+      protocol it negotiated (<em>h2</em> expected) and warns if HTTP/3
+      sneaks back in, so a repeat is diagnosable at a glance.</li>
+  <li><strong>Your failed meetings are still in the Watch Folder.</strong>
+      After updating, open the Audit Log and press <em>Retry</em> on each
+      failed row — every part is re-uploaded as one meeting.</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/ToshoniVC/MeetingTranscriber/releases/download/v0.7.2/Jot-0.7.2.zip" length="2778887" type="application/octet-stream" sparkle:edSignature="oIPjkz7mmtYZprhjb0gwZ4R6l175U91Jsw0YhZZBReb9Dm5oqn1OYiex9csYabzVzx6dZiqNi85KmGHmmFVvAA=="/>
+            <enclosure url="https://github.com/ToshoniVC/MeetingTranscriber/releases/download/v0.7.3/Jot-0.7.3.zip" length="2771989" type="application/octet-stream" sparkle:edSignature="ZCADB5AmxYUG0pCsANvN8dOO1v7JT7rWs3990XQzJ4XVaS/L5I0TiVSjAJAQhpD5Zo/vDQX20ybr/Uy+eadhAg=="/>
         </item>
     </channel>
 </rss>

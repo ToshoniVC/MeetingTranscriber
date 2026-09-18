@@ -23,4 +23,10 @@ enum Log {
     static let notion        = Logger(subsystem: subsystem, category: "notion")
     static let claudeCode    = Logger(subsystem: subsystem, category: "claude-code")
     static let manualUpload  = Logger(subsystem: subsystem, category: "manual-upload")
+
+    /// `Core/Networking` — the HTTP session policy + per-request negotiated-
+    /// protocol lines. Not a feature folder, but every HTTP client funnels
+    /// through it, so it gets its own category for
+    /// `log show --predicate 'subsystem == "com.toshonivc.jot" && category == "network"'`.
+    static let network       = Logger(subsystem: subsystem, category: "network")
 }

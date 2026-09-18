@@ -28,7 +28,10 @@ actor ClaudeCodeRoutineClient: ClaudeCodeRoutineFiring {
 
     private let session: URLSession
 
-    init(session: URLSession = .shared) {
+    /// - Parameter session: production uses `HTTPSessionPolicy.shared`
+    ///   (HTTP/3 disabled — see that type); tests inject a
+    ///   `URLProtocol`-mocked session.
+    init(session: URLSession = HTTPSessionPolicy.shared) {
         self.session = session
     }
 
@@ -62,13 +65,18 @@ actor ClaudeCodeRoutineClient: ClaudeCodeRoutineFiring {
 
         let data: Data
         let response: URLResponse
+        // v0.7.3: log the negotiated protocol ("h2" expected — see
+        // HTTPSessionPolicy).
+        let recorder = NegotiatedProtocolRecorder()
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await session.data(for: request, delegate: recorder)
         } catch let error as URLError {
+            Log.claudeCode.error("Claude Code fire failed over \(recorder.summary, privacy: .public): URLError \(error.code.rawValue, privacy: .public)")
             throw ClaudeCodeRoutineErrorMapper.transport(error)
         } catch {
             throw ClaudeCodeRoutineError.transport(message: error.localizedDescription)
         }
+        Log.claudeCode.notice("Claude Code fire negotiated \(recorder.summary, privacy: .public)")
 
         guard let http = response as? HTTPURLResponse else {
             throw ClaudeCodeRoutineError.decoding(message: "Response was not HTTP.")

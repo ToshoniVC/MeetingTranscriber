@@ -18,7 +18,11 @@ actor NotionClient: NotionMeetingWriter {
     /// `NotionClient`).
     private var databaseCache: [String: NotionDatabaseInfo] = [:]
 
-    init(session: URLSession = .shared) {
+    /// - Parameter session: production uses `HTTPSessionPolicy.shared`
+    ///   (HTTP/3 disabled — page bodies carry whole transcripts and hit the
+    ///   same macOS 27 QUIC stall as audio uploads); tests inject a
+    ///   `URLProtocol`-mocked session.
+    init(session: URLSession = HTTPSessionPolicy.shared) {
         self.session = session
     }
 
@@ -192,13 +196,20 @@ actor NotionClient: NotionMeetingWriter {
     private func perform<Out: Decodable>(_ request: URLRequest) async throws -> Out {
         let data: Data
         let response: URLResponse
+        // v0.7.3: log the negotiated protocol ("h2" expected — see
+        // HTTPSessionPolicy) so a Notion transport failure is diagnosable
+        // from Console without a debugger.
+        let recorder = NegotiatedProtocolRecorder()
+        let route = "\(request.httpMethod ?? "GET") \(request.url?.path(percentEncoded: false) ?? "?")"
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await session.data(for: request, delegate: recorder)
         } catch let error as URLError {
+            Log.notion.error("Notion \(route, privacy: .public) failed over \(recorder.summary, privacy: .public): URLError \(error.code.rawValue, privacy: .public)")
             throw NotionErrorMapper.transport(error)
         } catch {
             throw NotionError.transport(message: error.localizedDescription)
         }
+        Log.notion.notice("Notion \(route, privacy: .public) negotiated \(recorder.summary, privacy: .public)")
 
         guard let http = response as? HTTPURLResponse else {
             throw NotionError.decoding(message: "Response was not HTTP.")

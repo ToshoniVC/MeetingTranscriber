@@ -1,0 +1,26 @@
+<!--
+  Sparkle release notes for v0.7.3, shown in the in-app "Update available"
+  dialog. generate_appcast (release.yml) embeds this file as the appcast
+  item's <description> because its name matches the archive (Jot-0.7.3.zip
+  -> Jot-0.7.3.html). Keep it user-facing and short; the long-form
+  engineering log lives in CHANGELOG.md and the commit history.
+-->
+<h2>Jot 0.7.3</h2>
+<p>Fixes every transcription failing with <em>"The network connection was
+   lost"</em> or <em>"Request timed out"</em> on macOS 27 — on both
+   providers at once.</p>
+<ul>
+  <li><strong>Uploads no longer stall on HTTP/3.</strong> macOS 27 started
+      sending Jot's audio uploads over HTTP/3 (QUIC). On a network whose
+      router advertises an IPv6 link MTU below 1500, the system's QUIC
+      stack never recovers from the resulting "Message too long" errors, so
+      every part of every meeting failed on Groq and OpenAI alike. Jot now
+      keeps its transcription, Notion and Claude Code requests on HTTP/2
+      over TCP, where the same upload completes in about a second.</li>
+  <li><strong>The protocol shows in Console.</strong> Each upload logs the
+      protocol it negotiated (<em>h2</em> expected) and warns if HTTP/3
+      sneaks back in, so a repeat is diagnosable at a glance.</li>
+  <li><strong>Your failed meetings are still in the Watch Folder.</strong>
+      After updating, open the Audit Log and press <em>Retry</em> on each
+      failed row — every part is re-uploaded as one meeting.</li>
+</ul>

@@ -16,10 +16,12 @@ actor TranscriptionClient {
 
     private let session: URLSession
 
-    /// - Parameter session: URLSession used for the upload. Production passes
-    ///   `.shared`; tests inject a session configured with a `URLProtocol`
-    ///   subclass so no actual network traffic happens.
-    init(session: URLSession = .shared) {
+    /// - Parameter session: URLSession used for the upload. Production uses
+    ///   `HTTPSessionPolicy.shared` (HTTP/3 disabled — see that type for the
+    ///   macOS 27 QUIC stall it works around); tests inject a session
+    ///   configured with a `URLProtocol` subclass so no actual network
+    ///   traffic happens.
+    init(session: URLSession = HTTPSessionPolicy.shared) {
         self.session = session
     }
 
@@ -104,12 +106,29 @@ actor TranscriptionClient {
 
         let data: Data
         let response: URLResponse
+        // v0.7.3: record which protocol URLSession negotiated. The session
+        // comes from `HTTPSessionPolicy` with HTTP/3 disabled, so "h2" is
+        // the expected Console line; "h3" means the opt-out stopped working
+        // and uploads are back on the QUIC path that stalls on low-MTU
+        // links (see HTTPSessionPolicy).
+        let recorder = NegotiatedProtocolRecorder()
+        let host = request.urlRequest.url?.host(percentEncoded: false) ?? "<unknown host>"
         do {
-            (data, response) = try await session.upload(for: request.urlRequest, fromFile: request.bodyFileURL)
+            (data, response) = try await session.upload(
+                for: request.urlRequest,
+                fromFile: request.bodyFileURL,
+                delegate: recorder
+            )
         } catch let error as URLError {
+            Log.transcription.error("Upload to \(host, privacy: .public) failed over \(recorder.summary, privacy: .public): URLError \(error.code.rawValue, privacy: .public) (\(error.localizedDescription, privacy: .public))")
             throw map(urlError: error)
         } catch {
             throw TranscriptionError.transientNetwork(message: error.localizedDescription)
+        }
+        if recorder.usedHTTP3 {
+            Log.transcription.warning("Upload to \(host, privacy: .public) negotiated HTTP/3 despite the opt-out — uploads may stall on low-MTU links (see HTTPSessionPolicy).")
+        } else {
+            Log.transcription.notice("Upload to \(host, privacy: .public) negotiated \(recorder.summary, privacy: .public)")
         }
 
         guard let http = response as? HTTPURLResponse else {

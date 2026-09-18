@@ -51,6 +51,9 @@ MeetingTranscriber/                          # repo root
 │   │   │   └── Keychain.swift               # SecItem wrapper
 │   │   ├── Logging/
 │   │   │   └── Log.swift                    # os.Logger categories
+│   │   ├── Networking/                      # added v0.7.3; shared by Transcription, Notion, ClaudeCode
+│   │   │   ├── HTTPSessionPolicy.swift      # the URLSession every HTTP client uses (HTTP/3 disabled)
+│   │   │   └── NegotiatedProtocolRecorder.swift  # logs h2/h3 per request
 │   │   ├── LoginItem/
 │   │   │   └── LoginItemManager.swift       # SMAppService wrapper
 │   │   └── Updates/

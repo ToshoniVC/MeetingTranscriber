@@ -22,7 +22,7 @@ Inside the Xcode target folder we use a three-folder skeleton — **`Core/`**, *
 
 - **Every distinct feature/domain gets its own folder** under `Features/<FeatureName>/`. Both user-visible features and headless domains follow the same pattern. If you can name the responsibility in one noun, it's a feature.
 - **A feature folder is self-contained.** It owns its own views, view-models, models, domain-specific services, and helpers. Cross-feature reach-ins are not allowed — if feature A needs something from feature B, that something is part of B's public surface (see access rules below) and gets called, not copied.
-- **`Core/` is for app-wide infrastructure only.** App entrypoint, app-wide state, logging, single-instance services that every feature uses. If only one feature uses it, it does not belong in `Core/`.
+- **`Core/` is for app-wide infrastructure only.** App entrypoint, app-wide state, logging, the HTTP session policy (`Core/Networking/`, shared by every feature that talks to a server), single-instance services that every feature uses. If only one feature uses it, it does not belong in `Core/`.
 - **`Shared/` is for universally reusable UI primitives only.** Generic buttons, layout wrappers, view modifiers with zero domain knowledge. If it has any domain knowledge, it belongs in a feature folder.
 - **Nesting cap: 3–4 levels under the target folder.** Don't create deep hierarchies for their own sake — flatten.
 - **Swift access modifiers replace barrel files.** There's no `index.ts` equivalent in Swift. Instead: types that are part of a feature's public surface are `internal` (the default — visible across the module) or `public`. Everything else is `fileprivate` or `private`. Be deliberate — most types should be `fileprivate`.
@@ -70,7 +70,7 @@ The user reviews changes in VS Code's Source Control panel before anything reach
 - **No Combine unless there's a reason.** SwiftUI's `@Observable` + async sequences cover the cases we have.
 - **Errors are typed.** Each subsystem defines its own `Error` enum (`TranscriptionError`, `WatcherError`, …). Never `throw NSError(...)`. Never swallow errors silently — at minimum log and surface to the UI.
 - **No `try?` to hide failures.** Use `try?` only when `nil` is the genuinely correct response. Otherwise `do/catch` and handle the error.
-- **No `print()` in shipping code.** Use `os.Logger` with subsystem `com.toshonivc.jot` and a per-component category.
+- **No `print()` in shipping code.** Use `os.Logger` with subsystem `com.toshonivc.jot` and a per-component category — one per feature folder, plus `network` for `Core/Networking/`. Remember that `.info` lines are memory-only in the unified log; use `.notice` for the few lines that must survive to `log show` (e.g. the per-request "negotiated h2" line).
 - **File layout.** One type per file unless the types are tiny helpers. Folder organization is governed by §2 (Feature-Driven Design) and testing rules by §6.
 
 ---

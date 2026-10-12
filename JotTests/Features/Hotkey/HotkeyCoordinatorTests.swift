@@ -193,8 +193,10 @@ struct HotkeyCoordinatorTests {
         #expect(snapshot?.meetingName == "Standup")
         #expect(snapshot?.organizationId == acme.id)
         #expect(snapshot?.meetingSpecificContext == "Quarterly check-in")
-        #expect(snapshot?.resolvedCompiledContext.contains("Organization: Acme") == true)
-        #expect(snapshot?.resolvedCompiledContext.contains("Staff: Alice") == true)
+        // v0.8: the compiled prompt is a flat term list — no labels.
+        #expect(snapshot?.resolvedCompiledContext.contains("Acme") == true)
+        #expect(snapshot?.resolvedCompiledContext.contains("Alice") == true)
+        #expect(snapshot?.resolvedCompiledContext.contains("Organization:") == false)
         #expect(snapshot?.resolvedCompiledContext.contains("Quarterly check-in") == true)
     }
 

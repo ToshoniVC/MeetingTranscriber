@@ -1,0 +1,40 @@
+<!--
+  Sparkle release notes for v0.8.0, shown in the in-app "Update available"
+  dialog. generate_appcast (release.yml) embeds this file as the appcast
+  item's <description> because its name matches the archive (Jot-0.8.0.zip
+  -> Jot-0.8.0.html). Keep it user-facing and short; the long-form
+  engineering log lives in CHANGELOG.md and the commit history.
+-->
+<h2>Jot 0.8.0</h2>
+<p>Cleaner transcripts. Across your last ten meetings roughly one line in
+   eight was Whisper echoing the glossary back over silence, or stock
+   boilerplate like <em>"Thank you for watching"</em>. This release removes
+   that at the source and after the fact.</p>
+<ul>
+  <li><strong>The language is pinned.</strong> Jot now tells the model which
+      language to transcribe, so silent openings no longer come back as
+      Swedish and Dutch speech no longer comes back in English. The default
+      is Dutch (Context &rarr; General); each organization and each meeting
+      can pick its own, including in the Manual Upload prompt.</li>
+  <li><strong>Glossary echo and boilerplate are filtered out.</strong>
+      Lines that are just the glossary ("TnT", "Caleidos", the notes
+      sentence), outro and subtitle credits, bare URLs and symbol-only lines
+      are dropped. Timestamps are untouched.</li>
+  <li><strong>A leaner prompt.</strong> The context sent to the model is now
+      a flat list of names and terms &mdash; no "Organization:" or
+      "Meeting:" lines and no freeform notes, which were the most-echoed
+      parts. Each recording part also carries the end of the previous part
+      for continuity across splits.</li>
+  <li><strong>Silence is trimmed before upload.</strong> A recorder left
+      running before or after the meeting no longer feeds minutes of
+      nothing to the model. Timestamps stay on the original recording
+      clock.</li>
+  <li><strong>You can see what happened.</strong> Each Audit Log row shows
+      the language used and the share of lines filtered, e.g.
+      <em>&middot; nl &middot; 12% filtered</em>, and the on-disk
+      <code>.json</code> keeps the model's confidence fields. Retrying a
+      failed meeting reuses the same language.</li>
+</ul>
+<p>Worth doing after updating: add an organization for the companies that
+   recur in your meetings, with their names and terms, and check the
+   default language under Context &rarr; General.</p>

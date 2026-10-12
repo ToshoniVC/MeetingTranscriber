@@ -36,6 +36,9 @@ struct TranscriptionRequest {
     ///     `https://api.groq.com/openai/v1/audio/transcriptions`).
     ///   - model: model string sent in the `model` form field.
     ///   - apiKey: bearer token. Won't be logged anywhere.
+    ///   - prompt: optional Whisper `prompt` (glossary + continuation).
+    ///   - language: optional ISO-639-1 code for the `language` field. Nil or
+    ///     empty omits the field and lets the model auto-detect.
     ///   - timeout: per-request timeout. Plan §4 step 5: 5 minutes.
     ///   - boundary: multipart boundary string. Defaults to a fresh UUID-
     ///     based value; tests inject a deterministic one to make assertions.
@@ -48,6 +51,7 @@ struct TranscriptionRequest {
         model: String,
         apiKey: String,
         prompt: String? = nil,
+        language: String? = nil,
         timeout: TimeInterval = 300,
         boundary: String = Self.makeBoundary(),
         bodyFileFactory: () -> URL = Self.defaultBodyFile
@@ -60,7 +64,8 @@ struct TranscriptionRequest {
             boundary: boundary,
             model: model,
             audio: audio,
-            prompt: prompt
+            prompt: prompt,
+            language: language
         )
 
         var request = URLRequest(url: baseURL)
@@ -87,7 +92,8 @@ struct TranscriptionRequest {
         boundary: String,
         model: String,
         audio: URL,
-        prompt: String?
+        prompt: String?,
+        language: String?
     ) throws {
         FileManager.default.createFile(atPath: bodyFile.path(percentEncoded: false), contents: nil)
         let handle = try FileHandle(forWritingTo: bodyFile)
@@ -120,6 +126,18 @@ struct TranscriptionRequest {
             try write("--\(boundary)\r\n")
             try write("Content-Disposition: form-data; name=\"prompt\"\r\n\r\n")
             try write("\(prompt)\r\n")
+        }
+
+        // --- language field (optional) ---
+        // ISO-639-1 code. Pinning the language stops Whisper's per-window
+        // auto-detect from drifting into another language over silence
+        // (fabricated Swedish on a Dutch meeting) and from translating the
+        // speech into the prompt's language. Omitted when unset so the
+        // model auto-detects, exactly as before.
+        if let language = language?.trimmingCharacters(in: .whitespacesAndNewlines), !language.isEmpty {
+            try write("--\(boundary)\r\n")
+            try write("Content-Disposition: form-data; name=\"language\"\r\n\r\n")
+            try write("\(language)\r\n")
         }
 
         // --- file field (streamed) ---

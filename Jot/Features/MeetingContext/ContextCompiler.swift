@@ -1,29 +1,35 @@
 import Foundation
 
-/// Pure compilation of `(Organization?, meetingName, meetingSpecificContext)`
-/// into the Whisper `prompt` string. Order per PRD §6; trim + dedupe within
-/// each list; budget-truncate per `ContextCompilerBudget`.
+/// Pure compilation of `(Organization?, meetingSpecificContext, generalContext)`
+/// into the Whisper prompt's **glossary**: one flat, comma-separated list of
+/// the names and terms that need spelling guidance.
 ///
-/// Side-effect-free: callers (pipeline, snapshot store) get the same string
-/// for the same inputs. That determinism is what makes `context.md`
-/// (Phase G) useful as a reproducibility artifact.
+/// **Why a flat list.** The earlier labelled layout ("Organization: …",
+/// "Staff: …", "Meeting: …", "Notes: …") was transcribed back over every
+/// silent stretch — the organization and meeting lines most of all, and the
+/// freeform notes sentence verbatim, dozens of times per meeting. Whisper's
+/// `prompt` is spelling guidance, not instructions: labels and prose add
+/// nothing it can use and give it sentences to regurgitate. So the compiler
+/// now emits only the terms, drops the meeting name (file naming and Notion
+/// still use it) and the freeform notes (kept on the organization for the
+/// user's reference, never sent), and lets `TranscriptArtifactFilter` remove
+/// whatever echo remains using this exact string as its reference.
+///
+/// Side-effect-free: the same inputs always produce the same string. That
+/// determinism is what makes `context.md` useful as a reproducibility
+/// artifact.
 enum ContextCompiler {
 
-    /// Default lead-in that sets up Whisper to interpret the rest of the
-    /// prompt as a glossary of names and terms. Kept deliberately short and
-    /// label-like rather than a full sentence: during leading silence Whisper
-    /// can regurgitate the prompt as if it were spoken, and a terse fragment
-    /// is far less echo-prone than a prose sentence. This is only the
-    /// *fallback* — the live value is user-editable via `GeneralContext`
-    /// (Context tab → General), so callers normally pass `wrapperPrefix`
-    /// explicitly.
-    static let defaultWrapperPrefix = "Reference terms for this recording:"
+    /// Default lead-in. Empty on purpose: a label-like prefix is itself echo
+    /// bait during leading silence (an earlier default was transcribed back
+    /// as speech). The live value is user-editable via `GeneralContext`
+    /// (Context tab → General) for anyone who wants one.
+    static let defaultWrapperPrefix = ""
 
-    /// Compile per PRD §6. Returns `""` if there's nothing meaningful to
-    /// send (no organization and no meeting-specific context) — callers
-    /// interpret empty as "omit the `prompt` field entirely" (Phase F.4).
+    /// Compile the glossary. Returns `""` when there is nothing meaningful to
+    /// send (no organization, no meeting-specific context, no general
+    /// context) — callers interpret empty as "omit the `prompt` field".
     static func compile(
-        meetingName: String,
         meetingSpecificContext: String?,
         organization: Organization?,
         wrapperPrefix: String = defaultWrapperPrefix,
@@ -32,143 +38,97 @@ enum ContextCompiler {
     ) -> String {
         let trimmedMeetingContext = (meetingSpecificContext ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedName = meetingName.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedGeneral = (generalContext ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedPrefix = wrapperPrefix.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Per PRD §6 (extended): with no org, no meeting-specific context, and
-        // no general context there's nothing worth sending. Emitting the bare
-        // wrapper prefix on its own is exactly the echo-bait we want to avoid,
-        // and the meeting name alone is too weak a signal to bother including.
         if organization == nil && trimmedMeetingContext.isEmpty && trimmedGeneral.isEmpty {
             return ""
         }
 
         var sections: [Section] = []
-        // An empty wrapper prefix (user cleared it) is honored — we just omit
-        // the lead-in rather than emitting a blank line.
-        if !trimmedPrefix.isEmpty {
-            sections.append(Section(kind: .prefix, content: trimmedPrefix))
-        }
-        // Global, always-applied context sits right after the lead-in so it
-        // frames every meeting regardless of which organization is selected.
         if !trimmedGeneral.isEmpty {
-            sections.append(Section(kind: .generalContext, content: trimmedGeneral))
+            sections.append(Section(kind: .generalContext, terms: [flattened(trimmedGeneral)]))
         }
 
         if let org = organization {
-            let identity = renderIdentity(org)
+            let identity = identityTerms(org)
             if !identity.isEmpty {
-                sections.append(Section(kind: .orgIdentity, content: identity))
+                sections.append(Section(kind: .identity, terms: identity))
             }
-
             let staff = dedupe(org.staffNames)
             if !staff.isEmpty {
-                sections.append(Section(kind: .staff, content: "Staff: " + staff.joined(separator: ", ")))
+                sections.append(Section(kind: .staff, terms: staff))
             }
-
             let projects = dedupe(org.projectNames)
             if !projects.isEmpty {
-                sections.append(Section(kind: .projects, content: "Projects: " + projects.joined(separator: ", ")))
+                sections.append(Section(kind: .projects, terms: projects))
             }
-
-            let glossary = renderGlossary(terms: org.glossaryTerms, acronyms: org.acronyms)
+            let glossary = glossaryTerms(terms: org.glossaryTerms, acronyms: org.acronyms)
             if !glossary.isEmpty {
-                sections.append(Section(kind: .glossary, content: glossary))
+                sections.append(Section(kind: .glossary, terms: glossary))
             }
-
-            if let notes = org.freeformNotes?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !notes.isEmpty {
-                sections.append(Section(kind: .orgNotes, content: "Notes: " + notes))
-            }
-        }
-
-        if !trimmedName.isEmpty {
-            sections.append(Section(kind: .meetingName, content: "Meeting: " + trimmedName))
         }
 
         if !trimmedMeetingContext.isEmpty {
-            sections.append(Section(kind: .meetingContext, content: trimmedMeetingContext))
+            sections.append(Section(kind: .meetingContext, terms: [flattened(trimmedMeetingContext)]))
         }
 
-        return joinWithBudget(sections, budget: budget)
+        return render(sections, prefix: trimmedPrefix, budget: budget)
     }
 
     // MARK: - Section model + drop priority
 
     private struct Section {
         let kind: Kind
-        let content: String
+        let terms: [String]
 
         enum Kind {
-            case prefix
             case generalContext
-            case orgIdentity
+            case identity
             case staff
             case projects
             case glossary
-            case orgNotes
-            case meetingName
             case meetingContext
 
             /// Higher = dropped first under budget pressure. `nil` = never
-            /// dropped (prefix is tiny; org identity is the most valuable
-            /// signal once the user named an org). General context is the
-            /// stickiest *droppable* section — the user deliberately set it to
-            /// apply to every meeting, so it survives longer than per-org and
-            /// per-meeting sections.
+            /// dropped. General context is the stickiest *droppable* section —
+            /// the user deliberately set it to apply to every meeting.
             var dropPriority: Int? {
                 switch self {
-                case .prefix: return nil
-                case .orgIdentity: return nil
+                case .identity: return nil
                 case .generalContext: return 1
                 case .staff: return 2
                 case .projects: return 3
                 case .glossary: return 4
-                case .orgNotes: return 5
-                case .meetingName: return 6
-                case .meetingContext: return 7
+                case .meetingContext: return 5
                 }
             }
         }
     }
 
-    // MARK: - Section renderers
+    // MARK: - Term sources
 
-    private static func renderIdentity(_ org: Organization) -> String {
-        let trimmedName = org.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedCompany = org.companyName?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-        if !trimmedName.isEmpty, !trimmedCompany.isEmpty,
-           trimmedName.caseInsensitiveCompare(trimmedCompany) != .orderedSame {
-            return "Organization: \(trimmedName) (\(trimmedCompany))"
+    private static func identityTerms(_ org: Organization) -> [String] {
+        let name = org.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let company = org.companyName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var out: [String] = []
+        if !name.isEmpty { out.append(name) }
+        if !company.isEmpty, company.caseInsensitiveCompare(name) != .orderedSame {
+            out.append(company)
         }
-        if !trimmedName.isEmpty {
-            return "Organization: \(trimmedName)"
-        }
-        if !trimmedCompany.isEmpty {
-            return "Organization: \(trimmedCompany)"
-        }
-        return ""
+        return out
     }
 
-    private static func renderGlossary(terms: [String], acronyms: [AcronymEntry]) -> String {
-        let cleanTerms = dedupe(terms)
-        let cleanAcronyms = dedupedAcronyms(acronyms)
-
-        var parts: [String] = []
-        if !cleanTerms.isEmpty {
-            parts.append("Terms: " + cleanTerms.joined(separator: ", "))
+    /// Glossary terms followed by acronyms rendered `TERM (Expansion)` — both
+    /// spellings are useful guidance, and the parenthesis keeps the pair
+    /// readable in `context.md` and the Notion "Additional Context" section.
+    private static func glossaryTerms(terms: [String], acronyms: [AcronymEntry]) -> [String] {
+        var out = dedupe(terms)
+        for entry in dedupedAcronyms(acronyms) {
+            out.append("\(entry.term) (\(entry.expansion))")
         }
-        if !cleanAcronyms.isEmpty {
-            let rendered = cleanAcronyms
-                .map { "\($0.term) = \($0.expansion)" }
-                .joined(separator: "; ")
-            parts.append("Acronyms: " + rendered)
-        }
-        return parts.joined(separator: ". ")
+        return out
     }
 
     // MARK: - Trim + dedupe
@@ -181,17 +141,16 @@ enum ContextCompiler {
         for raw in items {
             let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
-            let key = trimmed.lowercased()
-            if seen.insert(key).inserted {
+            if seen.insert(trimmed.lowercased()).inserted {
                 out.append(trimmed)
             }
         }
         return out
     }
 
-    /// Same as `dedupe` but for acronyms; the dedupe key is the *term*,
-    /// so two entries with the same term but different expansions collapse
-    /// to the first.
+    /// Same as `dedupe` but for acronyms; the dedupe key is the *term*, so
+    /// two entries with the same term but different expansions collapse to
+    /// the first.
     private static func dedupedAcronyms(_ entries: [AcronymEntry]) -> [AcronymEntry] {
         var seen = Set<String>()
         var out: [AcronymEntry] = []
@@ -206,25 +165,37 @@ enum ContextCompiler {
         return out
     }
 
-    // MARK: - Budget
+    /// Free text (general / meeting-specific context) collapsed onto one
+    /// line so the compiled glossary stays a single run of text.
+    private static func flattened(_ text: String) -> String {
+        text.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
 
-    private static func joinWithBudget(
+    // MARK: - Rendering + budget
+
+    private static func render(
         _ sections: [Section],
+        prefix: String,
         budget: ContextCompilerBudget
     ) -> String {
-        let separator = "\n"
-        func combined(_ keep: [Section]) -> String {
-            keep.map(\.content).joined(separator: separator)
+        func joined(_ keep: [Section]) -> String {
+            // Dedupe across sections too — an organization name that also
+            // appears in the glossary should not be listed twice.
+            let terms = dedupe(keep.flatMap(\.terms))
+            guard !terms.isEmpty else { return "" }
+            let list = terms.joined(separator: ", ")
+            return prefix.isEmpty ? list : prefix + " " + list
         }
 
-        if combined(sections).count <= budget.maxCharacters {
-            return combined(sections)
-        }
+        let full = joined(sections)
+        if full.count <= budget.maxCharacters { return full }
 
-        // Sort indices of droppable sections by drop priority (desc) so we
-        // drop the least-valuable first. Stable across calls: deterministic
-        // tiebreak by original index.
-        let droppableIndices = sections.indices
+        // Drop the least valuable sections first; deterministic tiebreak by
+        // original index (later sections drop before earlier ones).
+        let droppable = sections.indices
             .filter { sections[$0].kind.dropPriority != nil }
             .sorted { lhs, rhs in
                 let lp = sections[lhs].kind.dropPriority ?? 0
@@ -232,24 +203,26 @@ enum ContextCompiler {
                 if lp != rp { return lp > rp }
                 return lhs > rhs
             }
-
         var dropped = Set<Int>()
-        for i in droppableIndices {
-            dropped.insert(i)
-            let remaining = sections.enumerated()
-                .filter { !dropped.contains($0.offset) }
-                .map { $0.element }
-            let joined = combined(remaining)
-            if joined.count <= budget.maxCharacters {
-                return joined
-            }
+        for index in droppable {
+            dropped.insert(index)
+            let remaining = sections.indices.filter { !dropped.contains($0) }.map { sections[$0] }
+            let candidate = joined(remaining)
+            if candidate.count <= budget.maxCharacters { return candidate }
         }
 
-        // Even with everything droppable removed (prefix + org identity
-        // only), still over. Last resort: hard-truncate the result so we
-        // never blow the budget. In practice this only fires if the org
-        // identity itself is enormous.
-        let core = combined(sections.enumerated().filter { !dropped.contains($0.offset) }.map { $0.element })
-        return String(core.prefix(budget.maxCharacters))
+        // Only the identity (and prefix) is left and it is still over budget.
+        // Hard-truncate at a word boundary so we never blow the limit.
+        let core = joined(sections.indices.filter { !dropped.contains($0) }.map { sections[$0] })
+        return truncated(core, to: budget.maxCharacters)
+    }
+
+    private static func truncated(_ text: String, to maxCharacters: Int) -> String {
+        guard text.count > maxCharacters else { return text }
+        let hard = String(text.prefix(maxCharacters))
+        if let lastSpace = hard.lastIndex(of: " "), lastSpace > hard.startIndex {
+            return String(hard[..<lastSpace]).trimmingCharacters(in: CharacterSet(charactersIn: ", "))
+        }
+        return hard
     }
 }

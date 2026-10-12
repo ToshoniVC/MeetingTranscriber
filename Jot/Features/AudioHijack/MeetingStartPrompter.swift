@@ -25,11 +25,12 @@ protocol MeetingStartPrompting: AnyObject {
 }
 
 /// Production prompt: an `NSAlert` with a stacked accessory view holding
-/// a name field, an organization popup, and a freeform context box.
+/// a name field, an organization popup, a language popup, and a freeform
+/// context box.
 ///
 /// Validation is enforced via the "Start" button's enabled state — flipped
-/// off whenever the trimmed meeting name is empty. Org always has a
-/// selection (either a real org or the "No Organization" sentinel) so it
+/// off whenever the trimmed meeting name is empty. Org and language always
+/// have a selection (a real value or their "default" sentinel) so they
 /// can't fail validation.
 @MainActor
 final class SystemMeetingStartPrompter: NSObject, MeetingStartPrompting, NSTextFieldDelegate {
@@ -38,6 +39,10 @@ final class SystemMeetingStartPrompter: NSObject, MeetingStartPrompting, NSTextF
     /// Lives on the menu item's `representedObject`; never written to
     /// disk.
     private static let noOrgTag = -1
+
+    /// Sentinel for the language popup's "Default" entry (inherit the
+    /// organization / app-wide language). Maps to `languageCode == nil`.
+    private static let inheritLanguageTag = -2
 
     private weak var startButton: NSButton?
     private weak var nameField: NSTextField?
@@ -66,18 +71,20 @@ final class SystemMeetingStartPrompter: NSObject, MeetingStartPrompting, NSTextF
         self.startButton = startButton
 
         // Accessory layout: vertical stack of (name field) (org popup)
-        // (context label) (scrollable context box). Width 380, total 220.
+        // (language popup) (context label) (scrollable context box).
+        // Width 380, total 282. Rows are 52 pt apart: 16 pt label, 22 pt
+        // control, 14 pt gap.
         let width: CGFloat = 380
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 230))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 282))
 
         // Name field
         let nameLabel = NSTextField(labelWithString: "Meeting name")
-        nameLabel.frame = NSRect(x: 0, y: 204, width: width, height: 16)
+        nameLabel.frame = NSRect(x: 0, y: 256, width: width, height: 16)
         nameLabel.font = .systemFont(ofSize: 11)
         nameLabel.textColor = .secondaryLabelColor
         container.addSubview(nameLabel)
 
-        let nameField = NSTextField(frame: NSRect(x: 0, y: 178, width: width, height: 22))
+        let nameField = NSTextField(frame: NSRect(x: 0, y: 230, width: width, height: 22))
         nameField.placeholderString = "e.g. Standup, Client Call"
         nameField.delegate = self
         container.addSubview(nameField)
@@ -85,12 +92,12 @@ final class SystemMeetingStartPrompter: NSObject, MeetingStartPrompting, NSTextF
 
         // Org popup
         let orgLabel = NSTextField(labelWithString: "Organization")
-        orgLabel.frame = NSRect(x: 0, y: 152, width: width, height: 16)
+        orgLabel.frame = NSRect(x: 0, y: 204, width: width, height: 16)
         orgLabel.font = .systemFont(ofSize: 11)
         orgLabel.textColor = .secondaryLabelColor
         container.addSubview(orgLabel)
 
-        let orgPopup = NSPopUpButton(frame: NSRect(x: 0, y: 126, width: width, height: 22))
+        let orgPopup = NSPopUpButton(frame: NSRect(x: 0, y: 178, width: width, height: 22))
         orgPopup.addItem(withTitle: "No Organization")
         orgPopup.menu?.items.first?.representedObject = Self.noOrgTag
         for org in organizations {
@@ -103,6 +110,27 @@ final class SystemMeetingStartPrompter: NSObject, MeetingStartPrompting, NSTextF
             orgPopup.selectItem(at: idx + 1) // +1 because index 0 is the sentinel
         }
         container.addSubview(orgPopup)
+
+        // Language popup. "Default" inherits the organization's language,
+        // then the app-wide default (Context → General). Pinning the
+        // language stops Whisper drifting into another language over
+        // silence and translating the speech.
+        let languageLabel = NSTextField(labelWithString: "Language")
+        languageLabel.frame = NSRect(x: 0, y: 152, width: width, height: 16)
+        languageLabel.font = .systemFont(ofSize: 11)
+        languageLabel.textColor = .secondaryLabelColor
+        container.addSubview(languageLabel)
+
+        let languagePopup = NSPopUpButton(frame: NSRect(x: 0, y: 126, width: width, height: 22))
+        languagePopup.addItem(withTitle: "Default (organization / app setting)")
+        languagePopup.menu?.items.last?.representedObject = Self.inheritLanguageTag
+        languagePopup.addItem(withTitle: TranscriptionLanguage.displayName(for: TranscriptionLanguage.autoDetectCode))
+        languagePopup.menu?.items.last?.representedObject = TranscriptionLanguage.autoDetectCode
+        for code in TranscriptionLanguage.pickerCodes {
+            languagePopup.addItem(withTitle: "\(TranscriptionLanguage.displayName(for: code)) (\(code))")
+            languagePopup.menu?.items.last?.representedObject = code
+        }
+        container.addSubview(languagePopup)
 
         // Context box
         let contextLabel = NSTextField(labelWithString: "Meeting-specific context (optional)")
@@ -144,13 +172,16 @@ final class SystemMeetingStartPrompter: NSObject, MeetingStartPrompting, NSTextF
             selectedOrgID = nil // "No Organization" sentinel
         }
 
+        let selectedLanguage = languagePopup.selectedItem?.representedObject as? String
+
         let contextText = contextView.string
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         return MeetingStartInputs(
             meetingName: trimmedName,
             organizationId: selectedOrgID,
-            meetingSpecificContext: contextText.isEmpty ? nil : contextText
+            meetingSpecificContext: contextText.isEmpty ? nil : contextText,
+            languageCode: selectedLanguage
         )
     }
 

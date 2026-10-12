@@ -47,12 +47,68 @@ struct AuditLogEntryTests {
         #expect(decoded == entries)
     }
 
+    // MARK: - Schema v8 (pinned language on retry)
+
+    @Test
+    func roundTrip_preservesRetryLanguageCode() throws {
+        let original = AuditLogEntry(
+            kind: .failure,
+            sourcePath: "/tmp/x.mp3",
+            message: "boom",
+            retryable: true,
+            batchPartPaths: ["/tmp/x.mp3", "/tmp/y.mp3"],
+            retryMeetingName: "Board",
+            retryLanguageCode: "nl"
+        )
+        let decoded = try JSONDecoder().decode(AuditLogEntry.self, from: try JSONEncoder().encode(original))
+        #expect(decoded == original)
+        #expect(decoded.retryLanguageCode == "nl")
+        #expect(decoded.schemaVersion == 8)
+    }
+
+    /// A schema-7 JSON payload (everything through `meetingFolderPath` but
+    /// no `retryLanguageCode`) decodes cleanly with the new field nil — the
+    /// migration contract for logs written before language pinning. A retry
+    /// of such a row falls back to the app-wide default language.
+    @Test
+    func decode_legacyV7Payload_leavesRetryLanguageCodeNil() throws {
+        let legacyJSON = """
+        {
+            "id": "77777777-7777-7777-7777-777777777777",
+            "timestamp": 1700000000.0,
+            "kind": "failure",
+            "sourcePath": "/tmp/legacy.mp3",
+            "message": "v7 failure",
+            "retryable": true,
+            "retryMeetingName": "Old meeting",
+            "meetingFolderPath": "/Output/Old meeting",
+            "schemaVersion": 7
+        }
+        """
+        let decoded = try JSONDecoder().decode(AuditLogEntry.self, from: Data(legacyJSON.utf8))
+        #expect(decoded.schemaVersion == 7)
+        #expect(decoded.retryLanguageCode == nil)
+        #expect(decoded.retryMeetingName == "Old meeting")
+    }
+
+    @Test
+    func copyHelpers_preserveRetryLanguageCode() {
+        let original = AuditLogEntry(
+            kind: .success, sourcePath: "/a", message: "x",
+            notionStatus: .pending, retryLanguageCode: "en"
+        )
+        #expect(original.withNotionStatus(.failed(message: "no")).retryLanguageCode == "en")
+        #expect(original.withClaudeCodeStatus(.fired).retryLanguageCode == "en")
+        #expect(original.withRetryable(false).retryLanguageCode == "en")
+    }
+
     // MARK: - Schema v7 (Notion-only retry payload)
 
     @Test
     func newEntry_defaultsToCurrentSchema() {
         let entry = AuditLogEntry(kind: .info, sourcePath: "/a", message: "x")
-        #expect(entry.schemaVersion == 7)
+        #expect(entry.schemaVersion == 8)
+        #expect(entry.retryLanguageCode == nil)
         #expect(entry.contextAttached == nil)
         #expect(entry.organizationName == nil)
         #expect(entry.notionStatus == nil)
@@ -215,7 +271,7 @@ struct AuditLogEntryTests {
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(AuditLogEntry.self, from: data)
         #expect(decoded == original)
-        #expect(decoded.schemaVersion == 7)
+        #expect(decoded.schemaVersion == 8)
         #expect(decoded.contextAttached == true)
         #expect(decoded.organizationName == "Acme")
     }

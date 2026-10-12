@@ -81,6 +81,19 @@ actor ProcessingPipeline {
     /// mock, and its planning math is unit-tested directly.
     private let audioChunker = AudioChunker()
 
+    /// Cuts leading/trailing silence off a part before upload so Whisper
+    /// has nothing to hallucinate over. Same stateless-collaborator shape
+    /// as `audioChunker`; its planning math is unit-tested directly and the
+    /// pipeline restores the recording clock afterwards.
+    private let silenceTrimmer = SilenceTrimmer()
+
+    /// App-wide default transcription language (`GeneralContext`), read
+    /// per file so a change in the Context tab applies without a pipeline
+    /// restart. Used only for files that arrive *outside* a Jot-kicked
+    /// recording — in-session files carry the resolved language on their
+    /// snapshot. Nil (test harnesses) means auto-detect.
+    private let defaultLanguage: (@Sendable () async -> String?)?
+
     /// Closures that hop to `@MainActor` to update UI state. Injected so the
     /// pipeline doesn't have to know about `AppSettings` or `MenuBarController`
     /// or `AuditLogStore` directly.
@@ -198,12 +211,14 @@ actor ProcessingPipeline {
         onNotionStatusChange: (@Sendable (UUID, NotionStatus) -> Void)? = nil,
         claudeCodeMode: ClaudeCodePipelineMode? = nil,
         onClaudeCodeStatusChange: (@Sendable (UUID, ClaudeCodeRoutineStatus) -> Void)? = nil,
-        providerSource: RotatingTranscriber.Source? = nil
+        providerSource: RotatingTranscriber.Source? = nil,
+        defaultLanguage: (@Sendable () async -> String?)? = nil
     ) {
         self.config = config
         self.watcher = watcher
         self.transcriptionClient = transcriptionClient
         self.fileOrganizer = fileOrganizer
+        self.defaultLanguage = defaultLanguage
         self.onStateChange = onStateChange
         self.onAuditEntry = onAuditEntry
         self.onRetrySucceeded = onRetrySucceeded
@@ -292,8 +307,10 @@ actor ProcessingPipeline {
         // finalized (the watcher only emits stable files), so transcribe it
         // now and buffer the result for assembly. Other outcomes need nothing
         // extra — `.buffered` waits for flush, `.emittedSingle` already routed.
-        if case .streamable(let prompt) = outcome {
-            startStreamingTranscription(url: url, prompt: prompt)
+        if case .streamable(let glossary, let language, let previousPart) = outcome {
+            startStreamingTranscription(
+                url: url, glossary: glossary, language: language, previousPart: previousPart
+            )
         }
     }
 
@@ -301,13 +318,39 @@ actor ProcessingPipeline {
     /// mid-meeting, storing the task for `processBatch` to await at assembly.
     /// The task runs on this actor but suspends at the network `await`, so
     /// concurrent streamed parts interleave without blocking watcher events.
-    private func startStreamingTranscription(url: URL, prompt: String?) {
+    ///
+    /// The part's prompt is the meeting glossary plus the tail of the
+    /// *previous* part's transcript (when that part was streamed and has
+    /// finished — awaited here, which is cheap because parts are minutes
+    /// apart). Continuity across Audio Hijack's split boundaries is what the
+    /// `prompt` field was built for; a failed or missing predecessor simply
+    /// means glossary-only, never a stalled part.
+    private func startStreamingTranscription(
+        url: URL,
+        glossary: String?,
+        language: String?,
+        previousPart: URL?
+    ) {
         guard streamingTranscriptions[url] == nil else { return }
         Log.pipeline.info("Streaming transcription for part \(url.lastPathComponent, privacy: .public) while recording continues")
         streamingTranscriptions[url] = Task { [weak self] in
             guard let self else { throw CancellationError() }
-            return try await self.runTranscription(audio: url, prompt: prompt)
+            let continuation = await self.continuationTail(afterPart: previousPart)
+            return try await self.runTranscription(
+                audio: url,
+                prompt: TranscriptionPrompt(glossary: glossary, continuation: continuation),
+                language: language
+            )
         }
+    }
+
+    /// The transcript tail of a streamed predecessor part, for prompt
+    /// continuation. Nil when there is no predecessor, it wasn't streamed,
+    /// or its transcription failed (assembly re-transcribes it later).
+    private func continuationTail(afterPart previous: URL?) async -> String? {
+        guard let previous, let task = streamingTranscriptions[previous] else { return nil }
+        guard let result = try? await task.value else { return nil }
+        return TranscriptionPrompt.continuationTail(of: result.text)
     }
 
     /// Cancel and drop every in-flight streamed transcription. Called on
@@ -349,7 +392,11 @@ actor ProcessingPipeline {
         if let batch = Self.reconstructBatch(from: entry) {
             await processBatch(batch, originalEntryId: entry.id)
         } else {
-            await process(url: URL(fileURLWithPath: entry.sourcePath), originalEntryId: entry.id)
+            await process(
+                url: URL(fileURLWithPath: entry.sourcePath),
+                originalEntryId: entry.id,
+                languageOverride: entry.retryLanguageCode
+            )
         }
     }
 
@@ -424,8 +471,9 @@ actor ProcessingPipeline {
     /// payload, or `nil` when the entry isn't a batch failure (so retry
     /// falls back to the single-file path). The reconstructed snapshot
     /// carries only what the batch path actually consumes — meeting name,
-    /// organization name, and the compiled prompt — which is enough to
-    /// re-rename, re-file, and re-publish identically to the original run.
+    /// organization name, the compiled prompt, and the pinned language —
+    /// which is enough to re-transcribe, re-rename, re-file, and re-publish
+    /// identically to the original run.
     nonisolated static func reconstructBatch(from entry: AuditLogEntry) -> MeetingBatch? {
         guard let paths = entry.batchPartPaths, !paths.isEmpty else { return nil }
         let parts = paths.map { URL(fileURLWithPath: $0) }
@@ -433,7 +481,8 @@ actor ProcessingPipeline {
             meetingName: entry.retryMeetingName
                 ?? parts[0].deletingPathExtension().lastPathComponent,
             organizationName: entry.organizationName,
-            resolvedCompiledContext: entry.retryCompiledContext ?? ""
+            resolvedCompiledContext: entry.retryCompiledContext ?? "",
+            languageCode: entry.retryLanguageCode
         )
         let started = entry.recordingStartedAt ?? entry.timestamp
         return MeetingBatch(
@@ -444,28 +493,61 @@ actor ProcessingPipeline {
         )
     }
 
-    // MARK: - Transcription dispatch (rotating vs legacy)
+    // MARK: - Transcription dispatch (trim → chunk → rotate)
 
-    /// Dispatch a transcription, transparently splitting an oversized file
-    /// so each upload fits under the endpoint's content-size limit. Files
-    /// within the limit transcribe in a single call (unchanged path).
+    /// Dispatch a transcription for one audio file. This single insertion
+    /// point covers every caller — the single-file path, each batch part,
+    /// and streamed parts — and layers three concerns:
     ///
-    /// Oversized files are re-encoded into contiguous `.m4a` chunks,
-    /// transcribed one at a time — with the same inter-part politeness
-    /// delay used between batch parts so the request burst doesn't trip a
-    /// per-minute rate limit — then stitched back into one logical result
-    /// via `TranscriptionResult.merging`, which shifts each chunk's segment
-    /// timestamps so the merged transcript reads as one continuous
-    /// recording. This single insertion point covers every caller: the
-    /// single-file path, each batch part, and streamed parts.
-    ///
-    /// If the file is oversized but can't be split (no audio track,
-    /// indeterminate duration, or a failed export), we fall back to a
-    /// single upload: the endpoint may still accept it, and if not its own
-    /// 413 surfaces the actionable error rather than a chunking failure.
+    /// 1. **Silence trim.** Leading/trailing silence is cut before upload
+    ///    (`SilenceTrimmer`) so Whisper has no empty windows to hallucinate
+    ///    over. The result is put back on the original recording clock
+    ///    afterwards, so nothing downstream can tell a trim happened. Any
+    ///    analysis or encoding failure means the original uploads untouched.
+    /// 2. **Chunking.** An oversized file is split into upload-sized `.m4a`
+    ///    chunks (`AudioChunker`), transcribed one at a time with the same
+    ///    inter-part politeness delay used between batch parts, and stitched
+    ///    back via `TranscriptionResult.merging`. Each chunk's prompt carries
+    ///    the previous chunk's transcript tail as continuation. If the file is
+    ///    oversized but can't be split, we fall back to a single upload so the
+    ///    endpoint's own 413 surfaces rather than a chunking failure.
+    /// 3. **Provider rotation.** Each upload walks the configured provider
+    ///    chain (`transcribeOnce`).
     private func runTranscription(
         audio: URL,
-        prompt: String?
+        prompt: TranscriptionPrompt,
+        language: String?
+    ) async throws -> TranscriptionResult {
+        var trimmed: SilenceTrimmer.Trimmed?
+        do {
+            trimmed = try await silenceTrimmer.trimIfNeeded(audio)
+        } catch let error as CancellationError {
+            throw error
+        } catch {
+            Log.pipeline.warning("Silence trim skipped for \(audio.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public) — uploading whole.")
+            trimmed = nil
+        }
+        defer {
+            if let trimmed { try? FileManager.default.removeItem(at: trimmed.directory) }
+        }
+        if let trimmed {
+            Log.pipeline.info("Trimmed \(audio.lastPathComponent, privacy: .public): head=\(trimmed.headSeconds, privacy: .public)s tail=\(trimmed.tailSeconds, privacy: .public)s of \(trimmed.originalDuration, privacy: .public)s")
+        }
+
+        let working = trimmed?.url ?? audio
+        let result = try await transcribeChunked(audio: working, prompt: prompt, language: language)
+        guard let trimmed else { return result }
+        return result.restoringRecordingClock(
+            headOffset: trimmed.headSeconds,
+            originalDuration: trimmed.originalDuration
+        )
+    }
+
+    /// Chunk-if-needed + transcribe. See `runTranscription` for the policy.
+    private func transcribeChunked(
+        audio: URL,
+        prompt: TranscriptionPrompt,
+        language: String?
     ) async throws -> TranscriptionResult {
         let chunkSet: AudioChunker.ChunkSet?
         do {
@@ -476,11 +558,11 @@ actor ProcessingPipeline {
             )
         } catch {
             Log.pipeline.warning("Chunking skipped for \(audio.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public) — uploading whole.")
-            return try await transcribeOnce(audio: audio, prompt: prompt)
+            return try await transcribeOnce(audio: audio, prompt: prompt, language: language)
         }
 
         guard let chunkSet else {
-            return try await transcribeOnce(audio: audio, prompt: prompt)
+            return try await transcribeOnce(audio: audio, prompt: prompt, language: language)
         }
 
         defer { try? FileManager.default.removeItem(at: chunkSet.directory) }
@@ -488,11 +570,13 @@ actor ProcessingPipeline {
 
         var chunkResults: [TranscriptionResult] = []
         chunkResults.reserveCapacity(chunkSet.urls.count)
+        var chunkPrompt = prompt
         for (index, chunkURL) in chunkSet.urls.enumerated() {
             if index > 0 {
                 try? await Task.sleep(nanoseconds: Self.interPartDelayNanos)
+                chunkPrompt = prompt.continuing(from: chunkResults.last?.text)
             }
-            chunkResults.append(try await transcribeOnce(audio: chunkURL, prompt: prompt))
+            chunkResults.append(try await transcribeOnce(audio: chunkURL, prompt: chunkPrompt, language: language))
         }
         return TranscriptionResult.merging(chunkResults)
     }
@@ -501,31 +585,75 @@ actor ProcessingPipeline {
     /// `RotatingTranscriber` (v0.4.5+) when a `providerSource` is wired,
     /// otherwise the single-provider call backed by the `PipelineConfig`
     /// snapshot (preserving the pre-0.4.5 behaviour older test fixtures
-    /// rely on). Split out from `runTranscription` so the chunking wrapper
-    /// can call it once per chunk.
+    /// rely on). Split out so the chunking wrapper can call it once per
+    /// chunk.
+    ///
+    /// Runs the glossary-aware echo filter on the way out: the client has
+    /// already applied the confidence and glossary-independent artifact
+    /// rules, but only this layer knows which terms were actually sent.
     private func transcribeOnce(
         audio: URL,
-        prompt: String?
+        prompt: TranscriptionPrompt,
+        language: String?
     ) async throws -> TranscriptionResult {
+        let result: TranscriptionResult
         if let providerSource {
             let rotator = RotatingTranscriber(
                 client: transcriptionClient,
                 source: providerSource
             )
-            return try await rotator.transcribe(audio: audio, prompt: prompt)
+            result = try await rotator.transcribe(
+                audio: audio, prompt: prompt.rendered, language: language
+            )
+        } else {
+            result = try await transcriptionClient.transcribe(
+                audio: audio,
+                baseURL: config.apiBaseURL,
+                model: config.model,
+                apiKey: config.apiKey,
+                prompt: prompt.rendered,
+                language: language
+            )
         }
-        return try await transcriptionClient.transcribe(
-            audio: audio,
-            baseURL: config.apiBaseURL,
-            model: config.model,
-            apiKey: config.apiKey,
-            prompt: prompt
-        )
+        let filtered = result.filteringArtifacts(glossary: prompt.glossary)
+        if filtered.droppedSegmentCount > 0 {
+            Log.pipeline.info("Filtered \(filtered.droppedSegmentCount, privacy: .public) of \(filtered.segments.count + filtered.droppedSegmentCount, privacy: .public) segments from \(audio.lastPathComponent, privacy: .public) (hallucination / prompt echo / boilerplate)")
+        }
+        return filtered
+    }
+
+    /// Audit-row suffix describing what was pinned and what was filtered,
+    /// e.g. ` · nl · 12% filtered (41/370)`. Empty when there is nothing to
+    /// say (auto-detect with no reported language and nothing filtered).
+    nonisolated static func qualitySuffix(
+        for result: TranscriptionResult,
+        requestedLanguage: String?
+    ) -> String {
+        var parts: [String] = []
+        if let requestedLanguage, !requestedLanguage.isEmpty {
+            parts.append(requestedLanguage)
+        } else if let detected = result.language, !detected.isEmpty {
+            parts.append("auto → \(detected.lowercased())")
+        }
+        if let fraction = result.filteredFraction {
+            let total = result.segments.count + result.droppedSegmentCount
+            let percent = Int((fraction * 100).rounded())
+            parts.append("\(percent)% filtered (\(result.droppedSegmentCount)/\(total))")
+        }
+        return parts.isEmpty ? "" : " · " + parts.joined(separator: " · ")
     }
 
     // MARK: - Per-file processing
 
-    private func process(url: URL, originalEntryId: UUID? = nil) async {
+    /// `languageOverride` is the language a failed row was transcribed with,
+    /// replayed on Retry; it applies only when no live snapshot matches the
+    /// file (the normal case for a retry, since the snapshot was consumed by
+    /// the original run).
+    private func process(
+        url: URL,
+        originalEntryId: UUID? = nil,
+        languageOverride: String? = nil
+    ) async {
         let startTime = Date()
         onStateChange(.processing(url))
 
@@ -549,13 +677,23 @@ actor ProcessingPipeline {
         // transcription still happens.
         let workingURL = await renameIfNeeded(url, with: snapshot) ?? url
 
-        // 0c. Pull the compiled prompt off the snapshot. Empty string and
+        // 0c. Pull the compiled glossary off the snapshot. Empty string and
         // nil collapse to nil — the transcription client omits the field
-        // entirely in that case, matching pre-Add-Context behaviour.
+        // entirely in that case, matching pre-Add-Context behaviour. The
+        // language comes from the snapshot when the file belongs to a
+        // Jot-kicked recording, else the app-wide default.
         let prompt = snapshot
             .map(\.resolvedCompiledContext)
             .flatMap { $0.isEmpty ? nil : $0 }
-        Log.pipeline.info("Prompt attached: \(prompt != nil ? "yes" : "no", privacy: .public)")
+        let language: String?
+        if let snapshot {
+            language = snapshot.languageCode
+        } else if let languageOverride {
+            language = languageOverride
+        } else {
+            language = await defaultLanguage?()
+        }
+        Log.pipeline.info("Prompt attached: \(prompt != nil ? "yes" : "no", privacy: .public); language: \(language ?? "auto", privacy: .public)")
 
         do {
             // 1. Transcribe — via the rotating chain when one's wired,
@@ -563,7 +701,8 @@ actor ProcessingPipeline {
             // PipelineConfig snapshot.
             let result = try await runTranscription(
                 audio: workingURL,
-                prompt: prompt
+                prompt: TranscriptionPrompt(glossary: prompt),
+                language: language
             )
 
             // 2. Organize: per-meeting folder + `.txt` + `.json` +
@@ -600,9 +739,10 @@ actor ProcessingPipeline {
             let initialStatus = initialNotionStatus()
             let initialClaudeCodeStatus = initialClaudeCodeStatus()
             let providerLabel = result.providerName.isEmpty ? nil : result.providerName
-            let message = providerLabel.map {
+            let quality = Self.qualitySuffix(for: result, requestedLanguage: language)
+            let message = (providerLabel.map {
                 "Transcribed via \($0) → \(meetingFolder.lastPathComponent)"
-            } ?? "Transcribed and filed → \(meetingFolder.lastPathComponent)"
+            } ?? "Transcribed and filed → \(meetingFolder.lastPathComponent)") + quality
             // Capture the meeting name, compiled context, and output-folder
             // path so a Notion-only retry can replay the page write from the
             // already-transcribed meeting on disk (schema v7). Mirrors the
@@ -623,7 +763,8 @@ actor ProcessingPipeline {
                 transcriptionProvider: providerLabel,
                 retryMeetingName: retryMeetingName,
                 retryCompiledContext: snapshot?.resolvedCompiledContext,
-                meetingFolderPath: meetingFolder.path(percentEncoded: false)
+                meetingFolderPath: meetingFolder.path(percentEncoded: false),
+                retryLanguageCode: language
             ))
             onStateChange(.idle)
 
@@ -660,16 +801,16 @@ actor ProcessingPipeline {
             }
 
         } catch let error as TranscriptionError {
-            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
+            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil, languageCode: language)
         } catch let error as RotatingTranscriber.RotationError {
-            recordFailure(url: workingURL, message: error.errorDescription ?? "All providers failed.", startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
+            recordFailure(url: workingURL, message: error.errorDescription ?? "All providers failed.", startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil, languageCode: language)
         } catch let error as FileOrganizerError {
-            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
+            recordFailure(url: workingURL, message: error.userFacingMessage, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil, languageCode: language)
         } catch is CancellationError {
             // Shutdown happened mid-flight — don't log as failure.
             return
         } catch {
-            recordFailure(url: workingURL, message: error.localizedDescription, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil)
+            recordFailure(url: workingURL, message: error.localizedDescription, startedAt: startTime, snapshot: snapshot, promptIncluded: prompt != nil, languageCode: language)
         }
     }
 
@@ -709,7 +850,8 @@ actor ProcessingPipeline {
         let prompt = snapshot.resolvedCompiledContext.isEmpty
             ? nil
             : snapshot.resolvedCompiledContext
-        Log.pipeline.info("Batch processing \(batch.parts.count, privacy: .public) parts; prompt attached: \(prompt != nil ? "yes" : "no", privacy: .public)")
+        let language = snapshot.languageCode
+        Log.pipeline.info("Batch processing \(batch.parts.count, privacy: .public) parts; prompt attached: \(prompt != nil ? "yes" : "no", privacy: .public); language: \(language ?? "auto", privacy: .public)")
 
         // Whatever happens, don't let this batch's streamed tasks outlive the
         // call (covers the early-throw paths below).
@@ -726,6 +868,7 @@ actor ProcessingPipeline {
             parts: resolvedParts,
             meetingName: snapshot.meetingName,
             compiledContext: prompt,
+            languageCode: language,
             recordingStartedAt: batch.startedAt
         )
 
@@ -782,7 +925,14 @@ actor ProcessingPipeline {
                     try? await Task.sleep(nanoseconds: Self.interPartDelayNanos)
                 }
                 freshTranscriptions += 1
-                partResults.append(try await runTranscription(audio: resolved, prompt: prompt))
+                // Prime this part with the tail of the previous part's
+                // transcript (streamed or fresh) — continuation across the
+                // split boundary, glossary-only for the first part.
+                let partPrompt = TranscriptionPrompt(glossary: prompt)
+                    .continuing(from: partResults.last?.text)
+                partResults.append(try await runTranscription(
+                    audio: resolved, prompt: partPrompt, language: language
+                ))
             }
 
             // 2. Rename each part with the meeting name and a "(part N)"
@@ -821,9 +971,10 @@ actor ProcessingPipeline {
             let initialClaudeCodeStatus = initialClaudeCodeStatus()
             let partCount = renamedParts.count
             let providerLabel = mergedResult.providerName.isEmpty ? nil : mergedResult.providerName
-            let message = providerLabel.map {
+            let quality = Self.qualitySuffix(for: mergedResult, requestedLanguage: language)
+            let message = (providerLabel.map {
                 "Transcribed via \($0) (\(partCount) parts) → \(meetingFolder.lastPathComponent)"
-            } ?? "Transcribed and filed (\(partCount) parts) → \(meetingFolder.lastPathComponent)"
+            } ?? "Transcribed and filed (\(partCount) parts) → \(meetingFolder.lastPathComponent)") + quality
             onAuditEntry(.init(
                 id: entryId,
                 kind: .success,
@@ -841,7 +992,8 @@ actor ProcessingPipeline {
                 // be replayed from the on-disk transcript without re-running.
                 retryMeetingName: snapshot.meetingName,
                 retryCompiledContext: snapshot.resolvedCompiledContext,
-                meetingFolderPath: meetingFolder.path(percentEncoded: false)
+                meetingFolderPath: meetingFolder.path(percentEncoded: false),
+                retryLanguageCode: language
             ))
             onStateChange(.idle)
 
@@ -1149,15 +1301,20 @@ actor ProcessingPipeline {
         let parts: [URL]
         let meetingName: String
         let compiledContext: String?
+        let languageCode: String?
         let recordingStartedAt: Date
     }
 
+    /// `languageCode` is the language this run was transcribed with, stamped
+    /// on the failure row so a Retry pins the same language. Falls back to
+    /// the batch payload's or the snapshot's value when not passed.
     private func recordFailure(
         url: URL,
         message: String,
         startedAt: Date,
         snapshot: MeetingContextSnapshot? = nil,
         promptIncluded: Bool = false,
+        languageCode: String? = nil,
         batchInfo: BatchRetryInfo? = nil
     ) {
         let ms = Int(Date().timeIntervalSince(startedAt) * 1000)
@@ -1172,7 +1329,8 @@ actor ProcessingPipeline {
             batchPartPaths: batchInfo?.parts.map { $0.path(percentEncoded: false) },
             retryMeetingName: batchInfo?.meetingName,
             retryCompiledContext: batchInfo?.compiledContext,
-            recordingStartedAt: batchInfo?.recordingStartedAt
+            recordingStartedAt: batchInfo?.recordingStartedAt,
+            retryLanguageCode: languageCode ?? batchInfo?.languageCode ?? snapshot?.languageCode
         ))
         // PRD §4.3: failed files must stay in the Watch Folder. We don't
         // touch the source on failure — `FileOrganizer` only moves on

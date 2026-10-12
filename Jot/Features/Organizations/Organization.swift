@@ -16,7 +16,20 @@ struct Organization: Identifiable, Codable, Equatable, Sendable {
     var projectNames: [String]
     var glossaryTerms: [String]
     var acronyms: [AcronymEntry]
+
+    /// Reference notes about the organization. **Not sent to Whisper** since
+    /// v0.8: a prose sentence in the prompt was transcribed back as speech
+    /// over every silence. Names and terms that need spelling guidance
+    /// belong in the lists above.
     var freeformNotes: String?
+
+    /// Default transcription language for this organization's meetings, as
+    /// an ISO-639-1 code (`"nl"`), `TranscriptionLanguage.autoDetectCode`
+    /// to force auto-detection, or `nil` to inherit the app-wide default.
+    /// Overridable per meeting. Decodes as `nil` from files written before
+    /// the field existed.
+    var languageCode: String?
+
     var isDefault: Bool
     let createdAt: Date
     var updatedAt: Date
@@ -35,6 +48,7 @@ struct Organization: Identifiable, Codable, Equatable, Sendable {
         glossaryTerms: [String] = [],
         acronyms: [AcronymEntry] = [],
         freeformNotes: String? = nil,
+        languageCode: String? = nil,
         isDefault: Bool = false,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
@@ -48,6 +62,7 @@ struct Organization: Identifiable, Codable, Equatable, Sendable {
         self.glossaryTerms = glossaryTerms
         self.acronyms = acronyms
         self.freeformNotes = freeformNotes
+        self.languageCode = languageCode
         self.isDefault = isDefault
         self.createdAt = createdAt
         self.updatedAt = updatedAt

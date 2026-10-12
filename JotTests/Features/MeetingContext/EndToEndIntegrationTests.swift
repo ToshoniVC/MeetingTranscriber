@@ -88,7 +88,6 @@ struct AddContextEndToEndIntegrationTests {
         // the snapshot directly with the compiled prompt.
         let contextStore = MeetingContextStore()
         let compiled = ContextCompiler.compile(
-            meetingName: "Standup",
             meetingSpecificContext: "Quarterly review of MRR.",
             organization: acme
         )
@@ -169,16 +168,18 @@ struct AddContextEndToEndIntegrationTests {
         let contextURL = meeting.appendingPathComponent("context.md")
         #expect(FileManager.default.fileExists(atPath: contextURL.path(percentEncoded: false)))
         let contextBody = try String(contentsOf: contextURL, encoding: .utf8)
-        #expect(contextBody.contains("Organization: Acme"))
-        #expect(contextBody.contains("Staff: Alice, Bob"))
-        #expect(contextBody.contains("MRR = Monthly Recurring Revenue"))
+        // v0.8: flat comma-separated term list, no section labels.
+        #expect(contextBody.contains("Acme"))
+        #expect(contextBody.contains("Alice, Bob"))
+        #expect(contextBody.contains("MRR (Monthly Recurring Revenue)"))
         #expect(contextBody.contains("Quarterly review of MRR."))
+        #expect(!contextBody.contains("Organization:"))
 
         // 6d. Audit log records context attached + org name.
         let success = capture.entries.first { $0.kind == .success }
         #expect(success?.contextAttached == true)
         #expect(success?.organizationName == "Acme")
-        #expect(success?.schemaVersion == 7)
+        #expect(success?.schemaVersion == 8)
     }
 
     /// Regression test for the no-orgs path: a user who never opens the

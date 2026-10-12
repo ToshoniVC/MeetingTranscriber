@@ -34,7 +34,8 @@ struct RotatingTranscriber: Sendable {
             baseURL: URL,
             model: String,
             apiKey: String,
-            prompt: String?
+            prompt: String?,
+            language: String?
         ) async throws -> TranscriptionResult
     }
 
@@ -90,7 +91,8 @@ struct RotatingTranscriber: Sendable {
     /// v0.4.5 all-error fallback policy.
     func transcribe(
         audio: URL,
-        prompt: String? = nil
+        prompt: String? = nil,
+        language: String? = nil
     ) async throws -> TranscriptionResult {
         let providers = await source.enabledOrdered()
         guard !providers.isEmpty else {
@@ -124,7 +126,8 @@ struct RotatingTranscriber: Sendable {
                     baseURL: baseURL,
                     model: provider.model,
                     apiKey: apiKey,
-                    prompt: prompt
+                    prompt: prompt,
+                    language: language
                 )
                 result.providerName = provider.displayName
                 Log.transcription.info(

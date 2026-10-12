@@ -3,6 +3,11 @@ import Foundation
 /// One row in the Audit Log tab (PRD §3.2 Tab 2). Codable so the
 /// `AuditLogStore` can persist the whole log to disk and survive relaunches.
 ///
+/// **Schema v8** (transcript quality): adds `retryLanguageCode`, the
+/// transcription language pinned for the meeting, so a Retry replays the
+/// same language instead of falling back to the app-wide default. Stamped
+/// on success rows too for consistency with the other retry fields.
+/// Optional → legacy rows decode cleanly.
 /// **Schema v7** (Notion-only retry): adds `meetingFolderPath` and starts
 /// populating `retryMeetingName` / `retryCompiledContext` on *success*
 /// rows too. Together they let the Audit Log replay just the Notion write
@@ -106,7 +111,13 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
     /// failure rows, on non-pipeline rows, and on v1–v6-schema rows. v7.
     let meetingFolderPath: String?
 
-    /// On-disk schema version. Bumped from 6 → 7 for `meetingFolderPath`.
+    /// The ISO-639-1 language the meeting was transcribed with (the snapshot's
+    /// resolved `languageCode`), replayed on Retry so a failed meeting is
+    /// re-transcribed in the same language the user pinned. `nil` means the
+    /// run auto-detected, or the row predates schema v8. v8.
+    let retryLanguageCode: String?
+
+    /// On-disk schema version. Bumped from 7 → 8 for `retryLanguageCode`.
     /// New entries default to the current value; legacy rows decode as 1
     /// (pre-Add-Context) when the field is absent.
     let schemaVersion: Int
@@ -129,7 +140,8 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         retryCompiledContext: String? = nil,
         recordingStartedAt: Date? = nil,
         meetingFolderPath: String? = nil,
-        schemaVersion: Int = 7
+        retryLanguageCode: String? = nil,
+        schemaVersion: Int = 8
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -148,6 +160,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         self.retryCompiledContext = retryCompiledContext
         self.recordingStartedAt = recordingStartedAt
         self.meetingFolderPath = meetingFolderPath
+        self.retryLanguageCode = retryLanguageCode
         self.schemaVersion = schemaVersion
     }
 
@@ -173,6 +186,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
         self.retryCompiledContext = try c.decodeIfPresent(String.self, forKey: .retryCompiledContext)
         self.recordingStartedAt = try c.decodeIfPresent(Date.self, forKey: .recordingStartedAt)
         self.meetingFolderPath = try c.decodeIfPresent(String.self, forKey: .meetingFolderPath)
+        self.retryLanguageCode = try c.decodeIfPresent(String.self, forKey: .retryLanguageCode)
         self.schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
     }
 
@@ -198,6 +212,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
             retryCompiledContext: retryCompiledContext,
             recordingStartedAt: recordingStartedAt,
             meetingFolderPath: meetingFolderPath,
+            retryLanguageCode: retryLanguageCode,
             schemaVersion: schemaVersion
         )
     }
@@ -224,6 +239,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
             retryCompiledContext: retryCompiledContext,
             recordingStartedAt: recordingStartedAt,
             meetingFolderPath: meetingFolderPath,
+            retryLanguageCode: retryLanguageCode,
             schemaVersion: schemaVersion
         )
     }
@@ -251,6 +267,7 @@ struct AuditLogEntry: Identifiable, Codable, Equatable, Sendable {
             retryCompiledContext: retryCompiledContext,
             recordingStartedAt: recordingStartedAt,
             meetingFolderPath: meetingFolderPath,
+            retryLanguageCode: retryLanguageCode,
             schemaVersion: schemaVersion
         )
     }

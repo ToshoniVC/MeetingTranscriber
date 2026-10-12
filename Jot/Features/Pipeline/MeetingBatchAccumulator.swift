@@ -27,9 +27,13 @@ enum PipelineWorkItem: Sendable, Equatable {
 enum IngestOutcome: Sendable, Equatable {
     /// Buffered into an *active* (still-recording) session. Safe to transcribe
     /// now — the watcher only emits finalized parts — so the pipeline streams
-    /// it ahead and buffers the result. `prompt` is the meeting's compiled
-    /// context (nil when empty), matching what `processBatch` would send.
-    case streamable(prompt: String?)
+    /// it ahead and buffers the result. `glossary` is the meeting's compiled
+    /// context (nil when empty) and `language` its resolved language code,
+    /// matching what `processBatch` would send. `previousPart` is the part
+    /// that landed just before this one in the same session (nil for the
+    /// first), so the pipeline can carry its transcript tail into this part's
+    /// prompt as continuation.
+    case streamable(glossary: String?, language: String?, previousPart: URL?)
     /// Buffered into a session that has already stopped (the trailing part, in
     /// its settle window). Left for end-of-meeting assembly.
     case buffered
@@ -179,6 +183,12 @@ actor MeetingBatchAccumulator {
     @discardableResult
     func ingest(_ url: URL, creationDate: Date, now: Date = Date()) async -> IngestOutcome {
         if var session = currentSession, matches(session: session, creationDate: creationDate, now: now) {
+            // The chronologically preceding part (by creation date) — the
+            // one whose transcript tail should prime this part's prompt.
+            let previousPart = session.parts
+                .filter { $0.url != url && $0.creationDate <= creationDate }
+                .max { $0.creationDate < $1.creationDate }?
+                .url
             if !session.parts.contains(where: { $0.url == url }) {
                 session.parts.append(BufferedPart(url: url, creationDate: creationDate))
                 currentSession = session
@@ -189,7 +199,11 @@ actor MeetingBatchAccumulator {
             // *after* Stop).
             if session.stoppedAt == nil {
                 let compiled = session.snapshot.resolvedCompiledContext
-                return .streamable(prompt: compiled.isEmpty ? nil : compiled)
+                return .streamable(
+                    glossary: compiled.isEmpty ? nil : compiled,
+                    language: session.snapshot.languageCode,
+                    previousPart: previousPart
+                )
             }
             return .buffered
         }

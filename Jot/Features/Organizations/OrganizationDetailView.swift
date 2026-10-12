@@ -54,6 +54,16 @@ struct OrganizationDetailView: View {
 
                 Toggle("Default for new meetings", isOn: defaultBinding)
                     .help("Preselected in the meeting-start prompt.")
+
+                Picker("Language", selection: languageBinding) {
+                    Text("App default").tag("")
+                    Text("Auto-detect").tag(TranscriptionLanguage.autoDetectCode)
+                    ForEach(TranscriptionLanguage.pickerCodes, id: \.self) { code in
+                        Text("\(TranscriptionLanguage.displayName(for: code)) (\(code))").tag(code)
+                    }
+                }
+                .pickerStyle(.menu)
+                .help("Transcription language for this organization's meetings. A meeting can still override it.")
             }
 
             Section("Staff") {
@@ -85,7 +95,7 @@ struct OrganizationDetailView: View {
                 TextEditor(text: notesBinding)
                     .frame(minHeight: 100)
                     .border(Color.secondary.opacity(0.2))
-                Text("Anything else Whisper should know about this org — pronunciations, jargon, product names.")
+                Text("Reference notes for you. Not sent to the transcription prompt — a sentence here gets transcribed back as speech during silence. Put names and terms that need spelling guidance in the lists above.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -116,6 +126,18 @@ struct OrganizationDetailView: View {
             set: { newValue in
                 guard var d = draft else { return }
                 d.companyName = newValue.isEmpty ? nil : newValue
+                draft = d
+                attemptPersist(d)
+            }
+        )
+    }
+
+    private var languageBinding: Binding<String> {
+        Binding(
+            get: { TranscriptionLanguage.normalized(draft?.languageCode) ?? "" },
+            set: { newValue in
+                guard var d = draft else { return }
+                d.languageCode = newValue.isEmpty ? nil : newValue
                 draft = d
                 attemptPersist(d)
             }

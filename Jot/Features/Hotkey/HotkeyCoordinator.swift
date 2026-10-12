@@ -340,11 +340,19 @@ final class HotkeyCoordinator {
         let org = inputs.organizationId.flatMap { organizations.organization(id: $0) }
         let general = generalContext.current
         let compiled = ContextCompiler.compile(
-            meetingName: inputs.meetingName,
             meetingSpecificContext: inputs.meetingSpecificContext,
             organization: org,
             wrapperPrefix: general.wrapperPrefix,
             generalContext: general.generalContext
+        )
+        // Language: the meeting's explicit choice, else the organization's
+        // default, else the app-wide default. Resolved once here so every
+        // part of this recording — streamed or assembled — pins the same
+        // language.
+        let language = TranscriptionLanguage.resolve(
+            meeting: inputs.languageCode,
+            organization: org?.languageCode,
+            general: general.defaultLanguageCode
         )
         meetingContextStore.recordStarted(
             meetingName: inputs.meetingName,
@@ -352,6 +360,7 @@ final class HotkeyCoordinator {
             organizationName: org?.name,
             meetingSpecificContext: inputs.meetingSpecificContext,
             resolvedCompiledContext: compiled,
+            languageCode: language,
             at: startedAt
         )
         // Mirror the snapshot into the batch accumulator so split files

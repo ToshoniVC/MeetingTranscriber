@@ -12,7 +12,8 @@ import Observation
 ///
 /// Unlike `OrganizationStore` there is no collection — exactly one record,
 /// exposed as `current`. A missing or unreadable file yields the default
-/// (`GeneralContext()`), which carries the default wrapper prefix.
+/// (`GeneralContext()`), which carries the default wrapper prefix and the
+/// shipped default language.
 @MainActor
 @Observable
 final class GeneralContextStore {
@@ -29,12 +30,17 @@ final class GeneralContextStore {
 
     // MARK: - Public API
 
-    /// Update one or both fields and persist. Passing `nil` leaves that field
-    /// untouched, so the two editor bindings can commit independently.
-    func update(wrapperPrefix: String? = nil, generalContext: String? = nil) {
+    /// Update any subset of fields and persist. Passing `nil` leaves that
+    /// field untouched, so the editor bindings can commit independently.
+    func update(
+        wrapperPrefix: String? = nil,
+        generalContext: String? = nil,
+        defaultLanguageCode: String? = nil
+    ) {
         var next = current
         if let wrapperPrefix { next.wrapperPrefix = wrapperPrefix }
         if let generalContext { next.generalContext = generalContext }
+        if let defaultLanguageCode { next.defaultLanguageCode = defaultLanguageCode }
         next.updatedAt = Date()
         current = next
         persist()

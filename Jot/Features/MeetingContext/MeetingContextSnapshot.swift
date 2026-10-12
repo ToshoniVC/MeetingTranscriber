@@ -23,7 +23,7 @@ struct MeetingContextSnapshot: Codable, Equatable, Sendable {
     /// in-recording editor. Trimmed when set; `nil` if empty.
     var meetingSpecificContext: String?
 
-    /// The compiled string sent to the transcription endpoint. Computed
+    /// The compiled glossary sent to the transcription endpoint. Computed
     /// from the org snapshot + meeting context at edit time; the pipeline
     /// may recompile defensively at file-arrival time (see plan Phase F.3).
     var resolvedCompiledContext: String
@@ -31,6 +31,13 @@ struct MeetingContextSnapshot: Codable, Equatable, Sendable {
     /// When the snapshot was last mutated. Updated by every `update(...)`
     /// call on the store; not bumped by `recordStarted`.
     var lastEditedAt: Date
+
+    /// The *resolved* transcription language for this meeting (ISO-639-1),
+    /// already run through `TranscriptionLanguage.resolve` across the
+    /// meeting / organization / app-wide levels. `nil` means auto-detect:
+    /// the request omits the `language` field. Decodes as `nil` from
+    /// snapshots written before the field existed.
+    var languageCode: String?
 
     var schemaVersion: Int
 
@@ -41,6 +48,7 @@ struct MeetingContextSnapshot: Codable, Equatable, Sendable {
         meetingSpecificContext: String? = nil,
         resolvedCompiledContext: String = "",
         lastEditedAt: Date = Date(),
+        languageCode: String? = nil,
         schemaVersion: Int = 1
     ) {
         self.meetingName = meetingName
@@ -49,6 +57,7 @@ struct MeetingContextSnapshot: Codable, Equatable, Sendable {
         self.meetingSpecificContext = meetingSpecificContext
         self.resolvedCompiledContext = resolvedCompiledContext
         self.lastEditedAt = lastEditedAt
+        self.languageCode = languageCode
         self.schemaVersion = schemaVersion
     }
 }

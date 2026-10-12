@@ -33,4 +33,19 @@ struct MeetingContextSnapshotTests {
         #expect(decoded.meetingSpecificContext == nil)
         #expect(decoded.resolvedCompiledContext == "")
     }
+
+    @Test
+    func roundTrip_preservesLanguageCode() throws {
+        let original = MeetingContextSnapshot(meetingName: "Sync", languageCode: "nl")
+        let decoded = try JSONDecoder().decode(MeetingContextSnapshot.self, from: try JSONEncoder().encode(original))
+        #expect(decoded.languageCode == "nl")
+    }
+
+    @Test
+    func decode_legacyPayloadWithoutLanguage_yieldsNil() throws {
+        let json = #"{"meetingName":"Old","resolvedCompiledContext":"","lastEditedAt":0,"schemaVersion":1}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(MeetingContextSnapshot.self, from: json)
+        #expect(decoded.languageCode == nil)
+        #expect(decoded.meetingName == "Old")
+    }
 }

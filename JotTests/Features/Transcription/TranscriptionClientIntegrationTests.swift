@@ -350,4 +350,63 @@ struct TranscriptionClientIntegrationTests {
         }
         #expect(MockURLProtocol.requests.isEmpty, "Validation should reject before sending")
     }
+
+    // MARK: - Language (v0.8)
+
+    @Test
+    func successfulRequest_decodesReportedLanguage() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        MockURLProtocol.responder = { _ in Self.okResponse(body: "hallo") }
+
+        let audio = Self.makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let client = TranscriptionClient(session: MockURLSession.make())
+        let result = try await client.transcribe(
+            audio: audio, baseURL: Self.baseURL,
+            model: "whisper-large-v3", apiKey: "sk-test",
+            prompt: "Calidos", language: "nl"
+        )
+        // The fixture reports "english"; the client surfaces whatever the
+        // server said so the audit row can show auto-detect drift.
+        #expect(result.language == "english")
+        #expect(result.droppedSegmentCount == 0)
+        #expect(MockURLProtocol.requests.count == 1)
+    }
+
+    @Test
+    func boilerplateSegments_areFilteredByTheClient() async throws {
+        MockURLProtocol.reset()
+        defer { MockURLProtocol.reset() }
+        MockURLProtocol.responder = { _ in
+            let response = HTTPURLResponse(
+                url: Self.baseURL, statusCode: 200,
+                httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]
+            )!
+            let payload: [String: Any] = [
+                "task": "transcribe", "language": "dutch", "duration": 40.0,
+                "text": " Dat is goed. Thank you for watching!",
+                "segments": [
+                    ["id": 0, "start": 0.0, "end": 2.0, "text": " Dat is goed."],
+                    ["id": 1, "start": 30.0, "end": 32.0, "text": " Thank you for watching!"],
+                ]
+            ]
+            return (response, try! JSONSerialization.data(withJSONObject: payload, options: []))
+        }
+
+        let audio = Self.makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let client = TranscriptionClient(session: MockURLSession.make())
+        let result = try await client.transcribe(
+            audio: audio, baseURL: Self.baseURL, model: "m", apiKey: "sk"
+        )
+        #expect(result.text == "Dat is goed.")
+        #expect(result.segments.count == 1)
+        #expect(result.droppedSegmentCount == 1)
+        #expect(result.language == "dutch")
+        // Raw body is the verbatim server response, boilerplate included.
+        #expect(String(data: result.rawJSON, encoding: .utf8)?.contains("Thank you for watching") == true)
+    }
 }

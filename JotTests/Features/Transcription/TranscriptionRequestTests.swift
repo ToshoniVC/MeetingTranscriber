@@ -264,4 +264,64 @@ struct TranscriptionRequestTests {
         let text = String(data: try Data(contentsOf: request.bodyFileURL), encoding: .utf8) ?? ""
         #expect(text.contains("Content-Type: audio/wav"))
     }
+
+    // MARK: - Language field (v0.8)
+
+    @Test
+    func language_omitted_whenNil() throws {
+        let audio = Self.makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let request = try TranscriptionRequest(
+            audio: audio, baseURL: Self.baseURL,
+            model: "m", apiKey: "sk",
+            language: nil,
+            boundary: "BBOUND"
+        )
+        defer { try? FileManager.default.removeItem(at: request.bodyFileURL) }
+
+        let text = String(data: try Data(contentsOf: request.bodyFileURL), encoding: .utf8) ?? ""
+        #expect(!text.contains("name=\"language\""))
+    }
+
+    @Test
+    func language_omitted_whenBlank() throws {
+        let audio = Self.makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let request = try TranscriptionRequest(
+            audio: audio, baseURL: Self.baseURL,
+            model: "m", apiKey: "sk",
+            language: "  ",
+            boundary: "BBOUND"
+        )
+        defer { try? FileManager.default.removeItem(at: request.bodyFileURL) }
+
+        let text = String(data: try Data(contentsOf: request.bodyFileURL), encoding: .utf8) ?? ""
+        #expect(!text.contains("name=\"language\""))
+    }
+
+    @Test
+    func language_includedAsMultipartField_whenSet() throws {
+        let audio = Self.makeAudio()
+        defer { try? FileManager.default.removeItem(at: audio) }
+
+        let request = try TranscriptionRequest(
+            audio: audio, baseURL: Self.baseURL,
+            model: "m", apiKey: "sk",
+            prompt: "Calidos, Otello",
+            language: "nl",
+            boundary: "BBOUND"
+        )
+        defer { try? FileManager.default.removeItem(at: request.bodyFileURL) }
+
+        let text = String(data: try Data(contentsOf: request.bodyFileURL), encoding: .utf8) ?? ""
+        #expect(text.range(of: "name=\"language\"\r\n\r\nnl\r\n") != nil)
+        #expect(text.contains("name=\"prompt\""))
+        // Field order: model, response_format, prompt, language, file.
+        let promptPos = text.range(of: "name=\"prompt\"")!.lowerBound
+        let languagePos = text.range(of: "name=\"language\"")!.lowerBound
+        let filePos = text.range(of: "name=\"file\"")!.lowerBound
+        #expect(promptPos < languagePos && languagePos < filePos)
+    }
 }

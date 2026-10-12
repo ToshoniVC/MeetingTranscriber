@@ -46,6 +46,11 @@ final class PipelineCoordinator {
     /// will fall back to its default `ProcessedFilesLedger()`.
     private let processedFilesLedger: ProcessedFilesLedger?
 
+    /// App-wide context, read per file for the default transcription
+    /// language of recordings that arrive outside a Jot-kicked session
+    /// (manual uploads, stray files). Nil for test contexts → auto-detect.
+    private let generalContextStore: GeneralContextStore?
+
     /// Current pipeline (if running). Nil between starts.
     private var pipeline: ProcessingPipeline?
 
@@ -67,7 +72,8 @@ final class PipelineCoordinator {
         meetingContextStore: MeetingContextStore? = nil,
         batchAccumulator: MeetingBatchAccumulator? = nil,
         providerStore: ProviderStore? = nil,
-        processedFilesLedger: ProcessedFilesLedger? = nil
+        processedFilesLedger: ProcessedFilesLedger? = nil,
+        generalContextStore: GeneralContextStore? = nil
     ) {
         self.settings = settings
         self.auditLog = auditLog
@@ -76,6 +82,7 @@ final class PipelineCoordinator {
         self.batchAccumulator = batchAccumulator
         self.providerStore = providerStore
         self.processedFilesLedger = processedFilesLedger
+        self.generalContextStore = generalContextStore
     }
 
     // MARK: - Public API
@@ -231,6 +238,17 @@ final class PipelineCoordinator {
             let notionMode = makeNotionMode()
             let claudeCodeMode = makeClaudeCodeMode()
             let auditLog = self.auditLog
+            let defaultLanguage: (@Sendable () async -> String?)? = generalContextStore.map { store in
+                { @Sendable in
+                    await MainActor.run {
+                        TranscriptionLanguage.resolve(
+                            meeting: nil,
+                            organization: nil,
+                            general: store.current.defaultLanguageCode
+                        )
+                    }
+                }
+            }
             let pipeline = ProcessingPipeline(
                 config: config,
                 watcher: watcher,
@@ -265,7 +283,8 @@ final class PipelineCoordinator {
                         auditLog.updateClaudeCodeStatus(status, forEntry: entryId)
                     }
                 },
-                providerSource: providerStore
+                providerSource: providerStore,
+                defaultLanguage: defaultLanguage
             )
             try await pipeline.start()
             self.pipeline = pipeline

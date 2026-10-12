@@ -21,6 +21,8 @@ struct CurrentMeetingEditorView: View {
     @State private var draftName: String = ""
     @State private var draftOrgId: UUID? = nil
     @State private var draftContext: String = ""
+    /// Resolved language code for this recording; empty = auto-detect.
+    @State private var draftLanguage: String = ""
 
     /// Identity of the recording whose values are currently loaded into the
     /// draft fields. `startedAt` is unique per recording, so when a new
@@ -52,7 +54,7 @@ struct CurrentMeetingEditorView: View {
             }
         }
         .padding()
-        .frame(minWidth: 420, minHeight: 360)
+        .frame(minWidth: 420, minHeight: 400)
         .navigationTitle("Current meeting")
         .onAppear(perform: loadDraftIfNeeded)
         .onChange(of: contextStore.pending?.startedAt) { _, _ in
@@ -88,6 +90,18 @@ struct CurrentMeetingEditorView: View {
                 }
                 .pickerStyle(.menu)
             }
+            Section("Language") {
+                Picker("Language", selection: languagePickerBinding) {
+                    Text("Auto-detect").tag("")
+                    ForEach(TranscriptionLanguage.pickerCodes, id: \.self) { code in
+                        Text("\(TranscriptionLanguage.displayName(for: code)) (\(code))").tag(code)
+                    }
+                }
+                .pickerStyle(.menu)
+                Text("Pinned for every part of this recording. Applies to parts that have not been uploaded yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("Meeting-specific context") {
                 TextEditor(text: $draftContext)
                     .frame(minHeight: 120)
@@ -118,6 +132,16 @@ struct CurrentMeetingEditorView: View {
         )
     }
 
+    private var languagePickerBinding: Binding<String> {
+        Binding(
+            get: { draftLanguage },
+            set: { new in
+                draftLanguage = new
+                commit(language: new)
+            }
+        )
+    }
+
     // MARK: - Sync helpers
 
     private func loadDraftIfNeeded() {
@@ -130,13 +154,20 @@ struct CurrentMeetingEditorView: View {
         draftName = snapshot.meetingName
         draftOrgId = snapshot.organizationId
         draftContext = snapshot.meetingSpecificContext ?? ""
+        draftLanguage = snapshot.languageCode ?? ""
         loadedStartedAt = pending.startedAt
     }
 
     /// Commit changes to the store and recompile the prompt. Each editor
     /// field calls this with just its own slice; we pull the rest from the
-    /// current draft state.
-    private func commit(name: String? = nil, org: UUID?? = nil, context: String? = nil) {
+    /// current draft state. The language is an explicit per-recording value
+    /// once loaded, so an organization change here does not re-derive it.
+    private func commit(
+        name: String? = nil,
+        org: UUID?? = nil,
+        context: String? = nil,
+        language: String? = nil
+    ) {
         guard contextStore.pending != nil else { return }
         let effectiveName = name ?? draftName
         let effectiveOrgID: UUID? = {
@@ -144,10 +175,10 @@ struct CurrentMeetingEditorView: View {
             return draftOrgId
         }()
         let effectiveContext = context ?? draftContext
+        let effectiveLanguage = language ?? draftLanguage
         let org = effectiveOrgID.flatMap { organizations.organization(id: $0) }
         let general = generalContext.current
         let compiled = ContextCompiler.compile(
-            meetingName: effectiveName,
             meetingSpecificContext: effectiveContext.isEmpty ? nil : effectiveContext,
             organization: org,
             wrapperPrefix: general.wrapperPrefix,
@@ -158,7 +189,8 @@ struct CurrentMeetingEditorView: View {
             organizationId: .some(effectiveOrgID),
             organizationName: .some(org?.name),
             meetingSpecificContext: .some(effectiveContext.isEmpty ? nil : effectiveContext),
-            resolvedCompiledContext: compiled
+            resolvedCompiledContext: compiled,
+            languageCode: .some(effectiveLanguage.isEmpty ? nil : effectiveLanguage)
         )
     }
 }

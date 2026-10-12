@@ -31,12 +31,13 @@ protocol MeetingUploadPrompting: AnyObject {
 }
 
 /// Production prompter for the manual-upload flow. Parallel to
-/// `SystemMeetingStartPrompter` — same accessory layout, different copy.
-/// We don't share the NSAlert builder between the two because the
-/// recording flow hides every other window before showing its modal
-/// (the prompt fires from a global hotkey while the user is in another
-/// app), whereas the upload flow originates from the Transcripts tab
-/// inside Jot's own window and leaves the surrounding UI in place.
+/// `SystemMeetingStartPrompter` — same accessory layout (name, organization,
+/// language, context), different copy. We don't share the NSAlert builder
+/// between the two because the recording flow hides every other window
+/// before showing its modal (the prompt fires from a global hotkey while
+/// the user is in another app), whereas the upload flow originates from the
+/// Transcripts tab inside Jot's own window and leaves the surrounding UI in
+/// place.
 @MainActor
 final class SystemMeetingUploadPrompter: NSObject, MeetingUploadPrompting, NSTextFieldDelegate {
 
@@ -44,6 +45,10 @@ final class SystemMeetingUploadPrompter: NSObject, MeetingUploadPrompting, NSTex
     /// Lives on the menu item's `representedObject`; never written to
     /// disk.
     private static let noOrgTag = -1
+
+    /// Sentinel for the language popup's "Default" entry (inherit the
+    /// organization / app-wide language). Maps to `languageCode == nil`.
+    private static let inheritLanguageTag = -2
 
     private weak var saveButton: NSButton?
     private weak var nameField: NSTextField?
@@ -62,28 +67,29 @@ final class SystemMeetingUploadPrompter: NSObject, MeetingUploadPrompting, NSTex
         alert.addButton(withTitle: "Cancel")
         self.saveButton = saveButton
 
+        // Rows are 52 pt apart: 16 pt label, 22 pt control, 14 pt gap.
         let width: CGFloat = 380
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 230))
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: 282))
 
         let nameLabel = NSTextField(labelWithString: "Meeting name")
-        nameLabel.frame = NSRect(x: 0, y: 204, width: width, height: 16)
+        nameLabel.frame = NSRect(x: 0, y: 256, width: width, height: 16)
         nameLabel.font = .systemFont(ofSize: 11)
         nameLabel.textColor = .secondaryLabelColor
         container.addSubview(nameLabel)
 
-        let nameField = NSTextField(frame: NSRect(x: 0, y: 178, width: width, height: 22))
+        let nameField = NSTextField(frame: NSRect(x: 0, y: 230, width: width, height: 22))
         nameField.placeholderString = "e.g. Standup, Client Call"
         nameField.delegate = self
         container.addSubview(nameField)
         self.nameField = nameField
 
         let orgLabel = NSTextField(labelWithString: "Organization")
-        orgLabel.frame = NSRect(x: 0, y: 152, width: width, height: 16)
+        orgLabel.frame = NSRect(x: 0, y: 204, width: width, height: 16)
         orgLabel.font = .systemFont(ofSize: 11)
         orgLabel.textColor = .secondaryLabelColor
         container.addSubview(orgLabel)
 
-        let orgPopup = NSPopUpButton(frame: NSRect(x: 0, y: 126, width: width, height: 22))
+        let orgPopup = NSPopUpButton(frame: NSRect(x: 0, y: 178, width: width, height: 22))
         orgPopup.addItem(withTitle: "No Organization")
         orgPopup.menu?.items.first?.representedObject = Self.noOrgTag
         for org in organizations {
@@ -96,6 +102,25 @@ final class SystemMeetingUploadPrompter: NSObject, MeetingUploadPrompting, NSTex
             orgPopup.selectItem(at: idx + 1)
         }
         container.addSubview(orgPopup)
+
+        // Language popup — same semantics as the recording prompt: "Default"
+        // inherits the organization's language, then the app-wide default.
+        let languageLabel = NSTextField(labelWithString: "Language")
+        languageLabel.frame = NSRect(x: 0, y: 152, width: width, height: 16)
+        languageLabel.font = .systemFont(ofSize: 11)
+        languageLabel.textColor = .secondaryLabelColor
+        container.addSubview(languageLabel)
+
+        let languagePopup = NSPopUpButton(frame: NSRect(x: 0, y: 126, width: width, height: 22))
+        languagePopup.addItem(withTitle: "Default (organization / app setting)")
+        languagePopup.menu?.items.last?.representedObject = Self.inheritLanguageTag
+        languagePopup.addItem(withTitle: TranscriptionLanguage.displayName(for: TranscriptionLanguage.autoDetectCode))
+        languagePopup.menu?.items.last?.representedObject = TranscriptionLanguage.autoDetectCode
+        for code in TranscriptionLanguage.pickerCodes {
+            languagePopup.addItem(withTitle: "\(TranscriptionLanguage.displayName(for: code)) (\(code))")
+            languagePopup.menu?.items.last?.representedObject = code
+        }
+        container.addSubview(languagePopup)
 
         let contextLabel = NSTextField(labelWithString: "Meeting-specific context (optional)")
         contextLabel.frame = NSRect(x: 0, y: 100, width: width, height: 16)
@@ -135,13 +160,16 @@ final class SystemMeetingUploadPrompter: NSObject, MeetingUploadPrompting, NSTex
             selectedOrgID = nil
         }
 
+        let selectedLanguage = languagePopup.selectedItem?.representedObject as? String
+
         let contextText = contextView.string
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         return MeetingStartInputs(
             meetingName: trimmedName,
             organizationId: selectedOrgID,
-            meetingSpecificContext: contextText.isEmpty ? nil : contextText
+            meetingSpecificContext: contextText.isEmpty ? nil : contextText,
+            languageCode: selectedLanguage
         )
     }
 

@@ -127,13 +127,15 @@ struct ProcessingPipelineRetryTests {
             batchPartPaths: ["/tmp/p1.mp3", "/tmp/p2.mp3", "/tmp/p3.mp3"],
             retryMeetingName: "Board Meeting",
             retryCompiledContext: "Org: Acme",
-            recordingStartedAt: Date(timeIntervalSince1970: 1_000)
+            recordingStartedAt: Date(timeIntervalSince1970: 1_000),
+            retryLanguageCode: "nl"
         )
         let batch = try! #require(ProcessingPipeline.reconstructBatch(from: entry))
         #expect(batch.parts.map(\.lastPathComponent) == ["p1.mp3", "p2.mp3", "p3.mp3"])
         #expect(batch.snapshot.meetingName == "Board Meeting")
         #expect(batch.snapshot.organizationName == "Acme")
         #expect(batch.snapshot.resolvedCompiledContext == "Org: Acme")
+        #expect(batch.snapshot.languageCode == "nl", "Retry must pin the same language as the original run")
         #expect(batch.startedAt == Date(timeIntervalSince1970: 1_000))
     }
 

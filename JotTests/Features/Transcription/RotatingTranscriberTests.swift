@@ -32,7 +32,8 @@ struct RotatingTranscriberTests {
             baseURL: URL,
             model: String,
             apiKey: String,
-            prompt: String?
+            prompt: String?,
+            language: String?
         ) async throws -> TranscriptionResult {
             lock.lock()
             calls.append(Call(baseURL: baseURL, model: model, apiKey: apiKey))

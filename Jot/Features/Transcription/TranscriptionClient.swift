@@ -38,6 +38,8 @@ actor TranscriptionClient {
     ///   - model: model string (e.g., `whisper-large-v3` for Groq,
     ///     `whisper-1` for OpenAI).
     ///   - apiKey: bearer token. Never logged.
+    ///   - prompt: optional Whisper `prompt` (`TranscriptionPrompt.rendered`).
+    ///   - language: optional ISO-639-1 code; nil lets the model auto-detect.
     /// - Returns: a `TranscriptionResult` carrying the transcript text,
     ///   the model-reported duration, the per-segment metadata, and the
     ///   verbatim JSON body the server returned (so callers can persist
@@ -48,18 +50,21 @@ actor TranscriptionClient {
         baseURL: URL,
         model: String,
         apiKey: String,
-        prompt: String? = nil
+        prompt: String? = nil,
+        language: String? = nil
     ) async throws -> TranscriptionResult {
         try validate(audio: audio, baseURL: baseURL, model: model, apiKey: apiKey)
 
         do {
             return try await performTranscription(
-                audio: audio, baseURL: baseURL, model: model, apiKey: apiKey, prompt: prompt
+                audio: audio, baseURL: baseURL, model: model, apiKey: apiKey,
+                prompt: prompt, language: language
             )
         } catch let error as TranscriptionError where TranscriptionErrorMapper.isRetryable(error) {
             Log.transcription.warning("Transcription transient failure, retrying once: \(error.userFacingMessage, privacy: .public)")
             return try await performTranscription(
-                audio: audio, baseURL: baseURL, model: model, apiKey: apiKey, prompt: prompt
+                audio: audio, baseURL: baseURL, model: model, apiKey: apiKey,
+                prompt: prompt, language: language
             )
         }
     }
@@ -89,14 +94,16 @@ actor TranscriptionClient {
         baseURL: URL,
         model: String,
         apiKey: String,
-        prompt: String?
+        prompt: String?,
+        language: String?
     ) async throws -> TranscriptionResult {
         let request = try TranscriptionRequest(
             audio: audio,
             baseURL: baseURL,
             model: model,
             apiKey: apiKey,
-            prompt: prompt
+            prompt: prompt,
+            language: language
         )
         defer {
             // Clean up the on-disk multipart body whether the request
@@ -182,21 +189,28 @@ actor TranscriptionClient {
             text: decoded.text.trimmingCharacters(in: CharacterSet.newlines),
             duration: decoded.duration,
             segments: segments,
-            rawJSON: data
+            rawJSON: data,
+            language: decoded.language?.trimmingCharacters(in: .whitespacesAndNewlines)
         )
-        // Drop hallucination segments (prompt-echo / silence noise) before the
-        // result leaves the client — applies to single files and, since the
-        // batch path filters each part here too, to multi-part meetings before
-        // they're merged. `rawJSON` stays the verbatim server response.
-        return result.filteringLikelyHallucinations()
+        // Drop hallucination segments before the result leaves the client —
+        // applies to single files and, since the batch path filters each
+        // part here too, to multi-part meetings before they're merged. Two
+        // passes: the confidence heuristics (silence noise, repetition
+        // loops), then the glossary-independent artifact rules (boilerplate,
+        // symbol-only lines). The pipeline runs the glossary-aware echo pass
+        // on top, because only it knows which terms were sent. `rawJSON`
+        // stays the verbatim server response.
+        return result
+            .filteringLikelyHallucinations()
+            .filteringArtifacts(glossary: nil)
     }
 
     // MARK: - Decoding
 
     /// Subset of the `verbose_json` response we decode. The full payload
-    /// has more fields (`task`, `language`, per-segment `tokens`,
-    /// `temperature`, etc.); we decode only what we use — the transcript,
-    /// timing, and the three per-segment confidence signals
+    /// has more fields (`task`, per-segment `tokens`, `temperature`, etc.);
+    /// we decode only what we use — the transcript, timing, the reported
+    /// `language`, and the three per-segment confidence signals
     /// (`avg_logprob`, `no_speech_prob`, `compression_ratio`) that
     /// `TranscriptionSegmentFilter` needs. Unmodeled fields still survive the
     /// round-trip on disk because `FileOrganizer` writes the verbatim
@@ -204,6 +218,7 @@ actor TranscriptionClient {
     private struct VerboseTranscriptionResponse: Decodable {
         let text: String
         let duration: Double?
+        let language: String?
         let segments: [Segment]?
 
         struct Segment: Decodable {

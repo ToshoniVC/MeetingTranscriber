@@ -63,7 +63,8 @@ struct JotApp: App {
             meetingContextStore: meetingContextStore,
             batchAccumulator: batchAccumulator,
             providerStore: providers,
-            processedFilesLedger: processedFilesLedger
+            processedFilesLedger: processedFilesLedger,
+            generalContextStore: generalContext
         )
         let audioHijack = AudioHijackPresence()
         let invoker = ShortcutInvoker()

@@ -43,6 +43,7 @@ final class MeetingContextStore {
         organizationName: String? = nil,
         meetingSpecificContext: String? = nil,
         resolvedCompiledContext: String = "",
+        languageCode: String? = nil,
         at date: Date = Date()
     ) {
         let trimmedName = meetingName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -58,7 +59,8 @@ final class MeetingContextStore {
             organizationName: organizationName,
             meetingSpecificContext: trimmedContext?.isEmpty == false ? trimmedContext : nil,
             resolvedCompiledContext: resolvedCompiledContext,
-            lastEditedAt: date
+            lastEditedAt: date,
+            languageCode: TranscriptionLanguage.normalized(languageCode)
         )
         pending = Pending(snapshot: snapshot, startedAt: date, stoppedAt: nil)
     }
@@ -80,6 +82,7 @@ final class MeetingContextStore {
         organizationName: String?? = nil,
         meetingSpecificContext: String?? = nil,
         resolvedCompiledContext: String? = nil,
+        languageCode: String?? = nil,
         at date: Date = Date()
     ) {
         guard var current = pending else { return }
@@ -98,6 +101,9 @@ final class MeetingContextStore {
         }
         if let resolvedCompiledContext {
             current.snapshot.resolvedCompiledContext = resolvedCompiledContext
+        }
+        if let languageCode {
+            current.snapshot.languageCode = TranscriptionLanguage.normalized(languageCode)
         }
         current.snapshot.lastEditedAt = date
         pending = current

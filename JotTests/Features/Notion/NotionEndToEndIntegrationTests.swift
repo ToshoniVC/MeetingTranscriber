@@ -94,7 +94,6 @@ struct NotionEndToEndIntegrationTests {
         // 2. User starts a meeting via the prompter equivalent.
         let contextStore = MeetingContextStore()
         let compiled = ContextCompiler.compile(
-            meetingName: "Standup",
             meetingSpecificContext: "Quarterly review of MRR.",
             organization: acme
         )
@@ -177,8 +176,9 @@ struct NotionEndToEndIntegrationTests {
         // v0.4.4: Notion receives the timestamped rendering. The mock's
         // single 0–1s segment renders as `[00:00:00] the standup transcript`.
         #expect(call.transcript == "[00:00:00] the standup transcript")
-        #expect(call.additionalContext.contains("Organization: Acme"))
-        #expect(call.additionalContext.contains("MRR = Monthly Recurring Revenue"))
+        // v0.8: flat term list, no labels.
+        #expect(call.additionalContext.contains("Acme"))
+        #expect(call.additionalContext.contains("MRR (Monthly Recurring Revenue)"))
         #expect(call.config.databaseId == Self.notionConfig.databaseId)
 
         // 6c. Audit row started .pending, ended .succeeded(url).

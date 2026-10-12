@@ -197,4 +197,28 @@ struct MeetingContextStoreTests {
         #expect(store.pendingStartedAt() == nil)
         #expect(store.pending == nil)
     }
+
+    // MARK: - Language (v0.8)
+
+    @MainActor
+    @Test
+    func recordStarted_normalizesLanguageCode() {
+        let store = MeetingContextStore()
+        store.recordStarted(meetingName: "Sync", languageCode: " NL ")
+        #expect(store.pending?.snapshot.languageCode == "nl")
+    }
+
+    @MainActor
+    @Test
+    func update_setsAndClearsLanguageCode() {
+        let store = MeetingContextStore()
+        store.recordStarted(meetingName: "Sync", languageCode: "nl")
+        store.update(languageCode: .some("en"))
+        #expect(store.pending?.snapshot.languageCode == "en")
+        store.update(languageCode: .some(nil))
+        #expect(store.pending?.snapshot.languageCode == nil)
+        // Untouched when not provided.
+        store.update(meetingName: "Renamed")
+        #expect(store.pending?.snapshot.languageCode == nil)
+    }
 }

@@ -81,4 +81,39 @@ struct GeneralContextStoreTests {
         #expect(store.current.wrapperPrefix == "New lead:")
         #expect(store.current.generalContext == "only general changed")
     }
+
+    // MARK: - Default language (v0.8)
+
+    @Test
+    func generalContext_decodesMissingLanguage_toDutchDefault() throws {
+        let json = #"{ "generalContext": "x", "wrapperPrefix": "" }"#.data(using: .utf8)!
+        let gc = try JSONDecoder().decode(GeneralContext.self, from: json)
+        #expect(gc.defaultLanguageCode == "nl")
+    }
+
+    @Test
+    func generalContext_roundTripsLanguage() throws {
+        let original = GeneralContext(
+            wrapperPrefix: "",
+            generalContext: "",
+            defaultLanguageCode: "en",
+            updatedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        let decoded = try JSONDecoder().decode(GeneralContext.self, from: try JSONEncoder().encode(original))
+        #expect(decoded == original)
+    }
+
+    @MainActor
+    @Test
+    func store_updateLanguage_persistsAndLeavesOtherFieldsUntouched() {
+        let url = tempURL()
+        let store = GeneralContextStore(fileURL: url)
+        store.update(generalContext: "terms")
+        store.update(defaultLanguageCode: "en")
+        #expect(store.current.defaultLanguageCode == "en")
+        #expect(store.current.generalContext == "terms")
+
+        let reloaded = GeneralContextStore(fileURL: url)
+        #expect(reloaded.current.defaultLanguageCode == "en")
+    }
 }

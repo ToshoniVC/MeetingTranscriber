@@ -123,4 +123,47 @@ struct TranscriptionResultMergingTests {
         #expect(segments[0]["start"] as? Double == 0)
         #expect(segments[1]["start"] as? Double == 30)
     }
+
+    // MARK: - Diagnostics survive the merge (v0.8)
+
+    @Test
+    func merging_carriesConfidenceFieldsLanguageAndDroppedCount() throws {
+        let p1 = TranscriptionResult(
+            text: "a", duration: 30,
+            segments: [.init(start: 0, end: 10, text: " a", avgLogprob: -0.3, noSpeechProb: 0.05, compressionRatio: 1.2)],
+            rawJSON: Data(), providerName: "Groq", language: "dutch", droppedSegmentCount: 4
+        )
+        let p2 = TranscriptionResult(
+            text: "b", duration: 20,
+            segments: [.init(start: 0, end: 5, text: " b", avgLogprob: -0.9, noSpeechProb: 0.4, compressionRatio: 1.8)],
+            rawJSON: Data(), providerName: "Groq", language: nil, droppedSegmentCount: 1
+        )
+        let merged = TranscriptionResult.merging([p1, p2])
+
+        #expect(merged.segments[1].start == 30)
+        #expect(merged.segments[1].avgLogprob == -0.9)
+        #expect(merged.segments[1].noSpeechProb == 0.4)
+        #expect(merged.segments[1].compressionRatio == 1.8)
+        #expect(merged.language == "dutch")
+        #expect(merged.droppedSegmentCount == 5)
+        #expect(merged.filteredFraction == 5.0 / 7.0)
+
+        let json = try #require(try JSONSerialization.jsonObject(with: merged.rawJSON) as? [String: Any])
+        #expect(json["language"] as? String == "dutch")
+        let segments = try #require(json["segments"] as? [[String: Any]])
+        #expect(segments[0]["avg_logprob"] as? Double == -0.3)
+        #expect(segments[1]["no_speech_prob"] as? Double == 0.4)
+        #expect(segments[1]["compression_ratio"] as? Double == 1.8)
+    }
+
+    @Test
+    func merging_omitsUnknownFieldsRatherThanFabricating() throws {
+        let p = Self.result(text: "a", duration: 30, segments: [Self.seg(0, 10, " a")])
+        let merged = TranscriptionResult.merging([p, p])
+        let json = try #require(try JSONSerialization.jsonObject(with: merged.rawJSON) as? [String: Any])
+        #expect(json["language"] == nil)
+        let segments = try #require(json["segments"] as? [[String: Any]])
+        #expect(segments[0]["avg_logprob"] == nil)
+        #expect(merged.filteredFraction == nil)
+    }
 }

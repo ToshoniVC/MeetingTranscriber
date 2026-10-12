@@ -224,11 +224,17 @@ final class ManualUploadCoordinator {
         let organization = inputs.organizationId.flatMap { organizations.organization(id: $0) }
         let general = generalContext.current
         let compiledContext = ContextCompiler.compile(
-            meetingName: trimmedName,
             meetingSpecificContext: inputs.meetingSpecificContext,
             organization: organization,
             wrapperPrefix: general.wrapperPrefix,
             generalContext: general.generalContext
+        )
+        // Language: the upload prompt's explicit choice, else the
+        // organization default, else the app-wide default.
+        let language = TranscriptionLanguage.resolve(
+            meeting: inputs.languageCode,
+            organization: organization?.languageCode,
+            general: general.defaultLanguageCode
         )
         let snapshot = MeetingContextSnapshot(
             meetingName: trimmedName,
@@ -236,7 +242,8 @@ final class ManualUploadCoordinator {
             organizationName: organization?.name,
             meetingSpecificContext: inputs.meetingSpecificContext,
             resolvedCompiledContext: compiledContext,
-            lastEditedAt: startedAt
+            lastEditedAt: startedAt,
+            languageCode: language
         )
 
         // 6. Dispatch to the right path. Multi-file goes through the
@@ -340,6 +347,7 @@ final class ManualUploadCoordinator {
             organizationName: snapshot.organizationName,
             meetingSpecificContext: snapshot.meetingSpecificContext,
             resolvedCompiledContext: snapshot.resolvedCompiledContext,
+            languageCode: snapshot.languageCode,
             at: startedAt
         )
 

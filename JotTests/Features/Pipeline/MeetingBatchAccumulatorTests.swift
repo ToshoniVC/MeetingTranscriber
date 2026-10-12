@@ -376,7 +376,7 @@ struct MeetingBatchAccumulatorTests {
         await acc.noteRecordingStarted(snapshot: snapshot, at: startedAt)
 
         let outcome = await acc.ingest(Self.url("part1.mp3"), creationDate: startedAt.addingTimeInterval(30))
-        #expect(outcome == .streamable(prompt: "Reference terms: Niels"))
+        #expect(outcome == .streamable(glossary: "Reference terms: Niels", language: nil, previousPart: nil))
     }
 
     @Test
@@ -387,7 +387,7 @@ struct MeetingBatchAccumulatorTests {
         await acc.noteRecordingStarted(snapshot: Self.makeSnapshot(), at: startedAt)
 
         let outcome = await acc.ingest(Self.url("part1.mp3"), creationDate: startedAt.addingTimeInterval(30))
-        #expect(outcome == .streamable(prompt: nil))
+        #expect(outcome == .streamable(glossary: nil, language: nil, previousPart: nil))
     }
 
     @Test
@@ -435,5 +435,29 @@ struct MeetingBatchAccumulatorTests {
         } else {
             Issue.record("Expected stop()'s flush to produce a .batch")
         }
+    }
+
+    @Test
+    func ingest_secondPartDuringActiveSession_reportsPreviousPartAndLanguage() async {
+        let (acc, _) = await Self.makeAccumulator()
+        let startedAt = Self.anchoredStart()
+        let snapshot = MeetingContextSnapshot(
+            meetingName: "Demo",
+            organizationId: nil,
+            organizationName: nil,
+            meetingSpecificContext: nil,
+            resolvedCompiledContext: "Niels, Calidos",
+            lastEditedAt: Date(),
+            languageCode: "nl"
+        )
+        await acc.noteRecordingStarted(snapshot: snapshot, at: startedAt)
+
+        let part1 = Self.url("part1.mp3")
+        let part2 = Self.url("part2.mp3")
+        let first = await acc.ingest(part1, creationDate: startedAt.addingTimeInterval(30))
+        let second = await acc.ingest(part2, creationDate: startedAt.addingTimeInterval(60))
+
+        #expect(first == .streamable(glossary: "Niels, Calidos", language: "nl", previousPart: nil))
+        #expect(second == .streamable(glossary: "Niels, Calidos", language: "nl", previousPart: part1))
     }
 }

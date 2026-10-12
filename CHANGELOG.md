@@ -5,6 +5,60 @@ Versions are tagged from `main` (`v0.1.0`, `v0.1.1`, …) and built/signed by
 release notes from the `<description>` element in `docs/appcast.xml`, not
 this file — this is the long-form humans-only log.
 
+## v0.8.0 — Transcript quality
+
+An audit of the ten most recent meetings in the Notion database found
+roughly one transcript segment in eight to be junk the pipeline let
+through: the compiled prompt echoed back over every silent stretch
+("TnT" 254 times in one meeting, the organization's notes sentence
+"spoken" twenty times), Whisper training-data boilerplate ("Thank you for
+watching", Amara subtitle credits), fabricated Swedish over silent
+openings, and Dutch speech rendered in English. The wrong organization's
+glossary was attached on four of ten meetings, and the merged on-disk
+`.json` had dropped the per-segment confidence fields, so none of it was
+measurable from the artifacts. This release addresses all of it except
+the organization picker (see `PRD/Backlog.md`).
+
+- **Language pinning.** Resolution is per-meeting choice → organization
+  default → app-wide default (ships as `nl`, editable in Context →
+  General) → auto-detect. Pickers in the meeting-start prompt, the
+  in-meeting editor, the Manual Upload prompt, each organization and the
+  General pane. The request sends the `language` form field. Failure rows
+  store the language so Retry replays it (`AuditLogEntry` schema v7 → v8;
+  older rows decode with the field nil and fall back to the app default).
+- **Prompt-echo and boilerplate filter.** New `TranscriptArtifactFilter`
+  runs after the confidence filter and drops segments that are the
+  glossary or near-misses of it ("Caleidos", "Ttijs", "TnT is a"), known
+  outro/subtitle boilerplate, bare URLs, symbol-only lines and runs of
+  identical short segments; it strips a *repeated* glossary lead-in ("TnT
+  TnT TnT I already…") but keeps a single leading term. It matches the
+  glossary only, never the previous-part continuation, and is
+  timeline-neutral. The confidence rule could not catch echo by
+  construction: an echo is a confident copy of the prompt, so its
+  `avg_logprob` is high. Measured against the twelve most recent on-disk
+  transcripts it removes 750 of 5,110 segments (14.7%).
+- **Slimmer glossary with continuation.** `ContextCompiler` emits one flat
+  comma-separated term list (organization, company, staff, projects,
+  glossary, acronyms, general context, meeting context). The
+  "Organization:", "Meeting:" and "Notes:" lines are gone, organization
+  freeform notes are no longer sent, the budget is 300 characters and the
+  default wrapper prefix is empty. Each part's prompt carries the previous
+  part's last ~400 characters of filtered text (`TranscriptionPrompt`), for
+  streamed parts, assembled parts and chunked oversized files alike.
+- **Silence trim.** New `SilenceTrimmer` cuts leading/trailing silence when
+  at least 5 s would be removed (adaptive threshold from the recording's
+  noise floor, 1 s padding, 0.3 s speech-run requirement) and re-encodes
+  only trimmed parts to 16 kHz mono AAC, which is what the endpoints
+  downsample to anyway. It never skips a part. The pipeline shifts
+  timestamps back by the head cut and restores the original duration
+  before merging, so the recording clock is preserved end to end; the
+  decode runs on a detached task so the pipeline actor keeps routing.
+- **Diagnostics.** `TranscriptionResult` carries the reported language and
+  a dropped-segment count; `merging` keeps `avg_logprob`, `no_speech_prob`
+  and `compression_ratio` per segment and writes them, plus language, into
+  the synthesized on-disk JSON. The audit success row gains a suffix such as
+  `· nl · 12% filtered (41/370)`.
+
 ## v0.7.3 — Uploads no longer stall on HTTP/3
 
 Every transcription upload failed on both providers after the Mac moved
